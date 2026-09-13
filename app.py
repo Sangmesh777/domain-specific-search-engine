@@ -1,3 +1,24 @@
+"""
+Flask HTTP adapter for the VTU domain-specific search engine.
+
+This module is an ADAPTER, not the search engine. It owns:
+
+    - Flask initialization and CORS
+    - path/runtime configuration
+    - HTTP request parsing
+    - HTTP response serialization
+    - routing
+    - background rebuild orchestration (threads, INDEXING/READY/ERROR)
+
+The search algorithm, ranking, snippets, index mutation, SQLite
+persistence, document extraction and rebuild implementation all live in
+the transport-independent `search_engine` package, which is the single
+authoritative implementation shared with the offline Android backend.
+
+Nothing in `search_engine/` may import Flask. Nothing in here should
+implement domain logic.
+"""
+
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
@@ -5,13 +26,36 @@ import os
 import json
 import sqlite3
 import math
-import re
-import PyPDF2
-import docx
 from urllib.parse import quote
-from werkzeug.utils import secure_filename
 import threading
 import time
+
+from search_engine.config import (
+    SUPPORTED_EXTENSIONS,
+)
+from search_engine.extraction import (
+    extract_pages,
+    extract_text,
+)
+from search_engine.filenames import (
+    sanitize_upload_filename,
+)
+from search_engine.pagination import (
+    empty_query_response,
+    paginate,
+)
+from search_engine.query import (
+    normalize_search_query,
+    parse_filetype_filter,
+)
+from search_engine.snippets import (
+    count_phrase_occurrences,
+    get_snippet_and_page,
+)
+from search_engine.tokenizer import (
+    tokenize,
+    tokenize_filename,
+)
 
 
 # ============================================================
@@ -45,864 +89,6 @@ SQLITE_DB_FILE = os.path.join(DATA_FOLDER, "search.db")
 
 if not os.path.exists(DATA_FOLDER):
     os.makedirs(DATA_FOLDER)
-
-
-# ============================================================
-# TOKENIZERS
-# ============================================================
-
-def tokenize(text):
-    """Tokenize normal document content."""
-
-    text = text.lower()
-
-    cleaned_text = "".join(
-        character
-        if character.isalnum() or character.isspace()
-        else " "
-        for character in text
-    )
-
-    return [
-        word
-        for word in cleaned_text.split()
-        if len(word) > 1
-    ]
-
-
-def tokenize_filename(text):
-    """
-    Tokenize filenames and search queries while preserving
-    numeric tokens such as 1, 2, and 3.
-    """
-
-    text = text.lower()
-
-    cleaned_text = "".join(
-        character
-        if character.isalnum() or character.isspace()
-        else " "
-        for character in text
-    )
-
-    return [
-        word
-        for word in cleaned_text.split()
-        if word
-    ]
-
-
-def normalize_search_query(query):
-    """
-    Normalize a search query before filename/content matching.
-
-    A supported document extension at the end of the query is
-    removed so that:
-
-        BCS502 Module 2.pdf
-        BCS502 Module 2
-
-    are treated as the same filename search.
-
-    Supported extensions:
-        .pdf
-        .docx
-        .txt
-    """
-
-    query = query.strip()
-
-    if not query:
-        return ""
-
-    # Handle a quoted query such as:
-    # "BCS502 Module 2.pdf"
-    quote_wrapped = (
-        len(query) >= 2
-        and query.startswith('"')
-        and query.endswith('"')
-    )
-
-    if quote_wrapped:
-        query = query[1:-1].strip()
-
-    lower_query = query.lower()
-
-    supported_extensions = (
-        ".pdf",
-        ".docx",
-        ".txt"
-    )
-
-    for extension in supported_extensions:
-
-        if lower_query.endswith(extension):
-
-            query = query[
-                :-len(extension)
-            ].rstrip()
-
-            break
-
-    if quote_wrapped:
-        return f'"{query}"'
-
-    return query
-
-
-def parse_filetype_filter(query):
-    """
-    Extract an optional document-type filter from a raw search query.
-
-    Supported forms:
-        pdf
-        .pdf
-        network pdf
-        network .pdf
-        BCS502 Module 2.pdf
-        "BCS502 Module 2.pdf"
-
-    Returns:
-        (remaining_keyword_query, filetype_filter)
-    """
-
-    query = query.strip()
-
-    supported_extensions = (
-        (".pdf", "pdf"),
-        (".docx", "docx"),
-        (".txt", "txt"),
-    )
-
-    # Handle an extension attached to the final filename token,
-    # including a quoted filename.
-    for extension, filetype in supported_extensions:
-
-        quoted_suffix = f'{extension}"'
-
-        if query.lower().endswith(
-            quoted_suffix
-        ):
-            return (
-                query[
-                    :-len(quoted_suffix)
-                ].rstrip() + '"'
-                if query[
-                    :-len(quoted_suffix)
-                ].rstrip()
-                else "",
-                filetype,
-            )
-
-        if query.lower().endswith(
-            extension
-        ):
-
-            return (
-                query[
-                    :-len(extension)
-                ].rstrip(),
-                filetype,
-            )
-
-    # Handle standalone type tokens, e.g.:
-    #   network pdf
-    #   customer .docx
-    tokens = query.split()
-
-    if not tokens:
-        return query, None
-
-    supported_types = {
-        "pdf": "pdf",
-        ".pdf": "pdf",
-        "docx": "docx",
-        ".docx": "docx",
-        "txt": "txt",
-        ".txt": "txt",
-    }
-
-    detected_type = None
-    remaining_tokens = []
-
-    for token in tokens:
-
-        normalized = token.lower().strip()
-
-        if normalized in supported_types:
-
-            if detected_type is None:
-                detected_type = supported_types[
-                    normalized
-                ]
-
-            continue
-
-        remaining_tokens.append(token)
-
-    return (
-        " ".join(remaining_tokens).strip(),
-        detected_type,
-    )
-
-
-# ============================================================
-# DOCUMENT EXTRACTION
-# ============================================================
-
-def extract_text(file_path, filename):
-    """Extract complete text from PDF, DOCX, or TXT."""
-
-    text = ""
-
-    try:
-        filename_lower = filename.lower()
-
-        if filename_lower.endswith(".pdf"):
-
-            with open(file_path, "rb") as file:
-                reader = PyPDF2.PdfReader(file)
-
-                for page in reader.pages:
-
-                    extracted = page.extract_text()
-
-                    if extracted:
-                        text += extracted + " "
-
-        elif filename_lower.endswith(".docx"):
-
-            document = docx.Document(file_path)
-
-            for paragraph in document.paragraphs:
-                text += paragraph.text + " "
-
-        elif filename_lower.endswith(".txt"):
-
-            with open(
-                file_path,
-                "r",
-                encoding="utf-8"
-            ) as file:
-                text = file.read()
-
-    except Exception as error:
-
-        print(
-            f"[ERROR] Could not read {filename}: {error}"
-        )
-
-    return text.lower()
-
-
-def extract_pages(file_path, filename):
-    """
-    Extract page-level text.
-
-    PDFs:
-        returns [{"page": 1, "text": "..."}]
-
-    DOCX/TXT:
-        treated as one logical page.
-    """
-
-    pages = []
-
-    try:
-
-        filename_lower = filename.lower()
-
-        if filename_lower.endswith(".pdf"):
-
-            with open(file_path, "rb") as file:
-
-                reader = PyPDF2.PdfReader(file)
-
-                for page_number, page in enumerate(
-                    reader.pages,
-                    start=1
-                ):
-
-                    extracted = page.extract_text()
-
-                    if extracted:
-                        pages.append({
-                            "page": page_number,
-                            "text": extracted.lower()
-                        })
-
-        elif filename_lower.endswith(".docx"):
-
-            document = docx.Document(file_path)
-
-            text = "\n".join(
-                paragraph.text
-                for paragraph in document.paragraphs
-            )
-
-            if text.strip():
-                pages.append({
-                    "page": 1,
-                    "text": text.lower()
-                })
-
-        elif filename_lower.endswith(".txt"):
-
-            with open(
-                file_path,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                text = file.read()
-
-                if text.strip():
-                    pages.append({
-                        "page": 1,
-                        "text": text.lower()
-                    })
-
-    except Exception as error:
-
-        print(
-            f"[ERROR] Could not extract pages from "
-            f"{filename}: {error}"
-        )
-
-    return pages
-
-
-def count_phrase_occurrences(text, phrase):
-    """
-    Count exact adjacent occurrences of a normalized phrase.
-
-    A phrase occurrence means the query terms appear next to each
-    other in the same order. Word proximity without adjacency is
-    not counted.
-    """
-
-    if not text or not phrase:
-        return 0
-
-    normalized_text = " ".join(
-        text.lower().split()
-    )
-
-    normalized_phrase = " ".join(
-        phrase.lower().split()
-    )
-
-    if not normalized_phrase:
-        return 0
-
-    count = 0
-    start = 0
-
-    while True:
-
-        position = normalized_text.find(
-            normalized_phrase,
-            start
-        )
-
-        if position == -1:
-            break
-
-        count += 1
-
-        start = (
-            position
-            +
-            len(normalized_phrase)
-        )
-
-    return count
-
-
-# ============================================================
-# PAGE-AWARE SNIPPET
-# ============================================================
-
-def get_snippet_and_page(
-    filename,
-    query_words,
-    window=140
-):
-    """
-    Return the best matching page/snippet.
-
-    Match priority:
-    1. Exact multi-word phrase.
-    2. Exact token occurrence.
-    3. Prefix occurrence.
-    4. Nearby/proximity fallback.
-
-    Highlights are relative to the returned snippet.
-    """
-
-    pages = PAGE_TEXT_INDEX.get(
-        filename,
-        []
-    )
-
-    if not pages:
-        return {
-            "snippet": "No readable text found.",
-            "page": None,
-            "highlights": []
-        }
-
-    cleaned_words = [
-        word.lower().strip()
-        for word in query_words
-        if word
-    ]
-
-    cleaned_words = list(
-        dict.fromkeys(cleaned_words)
-    )
-
-    if not cleaned_words:
-        return {
-            "snippet": "No matching text found.",
-            "page": None,
-            "highlights": []
-        }
-
-    phrase = " ".join(cleaned_words)
-
-    # --------------------------------------------------------
-    # 1. EXACT PHRASE
-    # --------------------------------------------------------
-    if len(cleaned_words) >= 2:
-
-        for page_data in pages:
-
-            page_number = page_data["page"]
-
-            original_text = " ".join(
-                page_data["text"].split()
-            )
-
-            lower_text = original_text.lower()
-
-            phrase_position = lower_text.find(
-                phrase
-            )
-
-            if phrase_position != -1:
-
-                return build_snippet_result(
-                    original_text,
-                    page_number,
-                    phrase_position,
-                    len(phrase),
-                    window,
-                    phrase
-                )
-
-    # --------------------------------------------------------
-    # 2. EXACT TOKEN
-    # --------------------------------------------------------
-    exact_candidates = []
-
-    for page_data in pages:
-
-        page_number = page_data["page"]
-
-        original_text = " ".join(
-            page_data["text"].split()
-        )
-
-        lower_text = original_text.lower()
-
-        for word in cleaned_words:
-
-            # Token boundary-aware exact matching.
-            pattern = (
-                r"(?<![a-z0-9])"
-                +
-                re.escape(word)
-                +
-                r"(?![a-z0-9])"
-            )
-
-            match = re.search(
-                pattern,
-                lower_text
-            )
-
-            if match:
-
-                exact_candidates.append({
-                    "page": page_number,
-                    "position": match.start(),
-                    "length": len(word),
-                    "text": original_text,
-                    "word": word,
-                    "score": 100000
-                })
-
-    if exact_candidates:
-
-        # Prefer the first exact candidate in the earliest page only after
-        # exactness has been established.
-        best = exact_candidates[0]
-
-        return build_snippet_result(
-            best["text"],
-            best["page"],
-            best["position"],
-            best["length"],
-            window,
-            best["word"]
-        )
-
-    # --------------------------------------------------------
-    # 3. PREFIX MATCH
-    # --------------------------------------------------------
-    prefix_candidates = []
-
-    for page_data in pages:
-
-        page_number = page_data["page"]
-
-        original_text = " ".join(
-            page_data["text"].split()
-        )
-
-        lower_text = original_text.lower()
-
-        for word in cleaned_words:
-
-            if len(word) < 3:
-                continue
-
-            pattern = (
-                r"(?<![a-z0-9])"
-                +
-                re.escape(word)
-                +
-                r"[a-z0-9]+"
-            )
-
-            match = re.search(
-                pattern,
-                lower_text
-            )
-
-            if match:
-
-                matched_text = match.group(0)
-
-                prefix_similarity = (
-                    len(word)
-                    /
-                    float(
-                        max(
-                            len(matched_text),
-                            1
-                        )
-                    )
-                )
-
-                prefix_candidates.append({
-                    "page": page_number,
-                    "position": match.start(),
-                    "length": len(matched_text),
-                    "text": original_text,
-                    "word": word,
-                    "score":
-                        50000
-                        +
-                        prefix_similarity
-                })
-
-    if prefix_candidates:
-
-        best = max(
-            prefix_candidates,
-            key=lambda item: item["score"]
-        )
-
-        return build_snippet_result(
-            best["text"],
-            best["page"],
-            best["position"],
-            best["length"],
-            window,
-            best["word"]
-        )
-
-    # --------------------------------------------------------
-    # 4. PROXIMITY FALLBACK
-    # --------------------------------------------------------
-    best = None
-    best_score = -1
-
-    for page_data in pages:
-
-        page_number = page_data["page"]
-
-        original_text = " ".join(
-            page_data["text"].split()
-        )
-
-        lower_text = original_text.lower()
-
-        if not lower_text:
-            continue
-
-        candidates = []
-
-        for word in cleaned_words:
-
-            search_position = 0
-
-            while True:
-
-                position = lower_text.find(
-                    word,
-                    search_position
-                )
-
-                if position == -1:
-                    break
-
-                candidates.append(
-                    (
-                        position,
-                        word
-                    )
-                )
-
-                search_position = (
-                    position + len(word)
-                )
-
-        for (
-            position,
-            matched_word
-        ) in candidates:
-
-            local_start = max(
-                0,
-                position - window
-            )
-
-            local_end = min(
-                len(original_text),
-                position + window
-            )
-
-            local_text = lower_text[
-                local_start:local_end
-            ]
-
-            nearby_terms = sum(
-                1
-                for word
-                in cleaned_words
-                if word in local_text
-            )
-
-            candidate_score = (
-                nearby_terms * 1000
-                +
-                len(matched_word)
-            )
-
-            if candidate_score > best_score:
-
-                best_score = candidate_score
-
-                best = {
-                    "page": page_number,
-                    "position": position,
-                    "length": len(matched_word),
-                    "text": original_text,
-                    "score": candidate_score
-                }
-
-    if best is None:
-
-        return {
-            "snippet": "No matching text found.",
-            "page": None,
-            "highlights": []
-        }
-
-    return build_snippet_result(
-        best["text"],
-        best["page"],
-        best["position"],
-        best["length"],
-        window,
-        phrase
-    )
-
-
-def build_snippet_result(
-    text,
-    page_number,
-    position,
-    match_length,
-    window,
-    highlight_query
-):
-    """
-    Build the final snippet and highlight ranges around a chosen match.
-    """
-
-    start = max(
-        0,
-        position - window
-    )
-
-    end = min(
-        len(text),
-        position + match_length + window
-    )
-
-    snippet = text[
-        start:end
-    ].strip()
-
-    if start > 0:
-        first_space = snippet.find(" ")
-
-        if first_space != -1:
-            snippet = snippet[
-                first_space + 1:
-            ]
-
-        snippet = "... " + snippet
-
-    if end < len(text):
-        last_space = snippet.rfind(" ")
-
-        if last_space != -1:
-            snippet = snippet[
-                :last_space
-            ]
-
-        snippet += " ..."
-
-    highlights = []
-
-    lower_snippet = snippet.lower()
-    query = " ".join(
-        highlight_query.lower().split()
-    )
-
-    # Exact phrase/token first.
-    search_position = 0
-
-    while True:
-
-        found = lower_snippet.find(
-            query,
-            search_position
-        )
-
-        if found == -1:
-            break
-
-        highlights.append({
-            "start": found,
-            "end": found + len(query)
-        })
-
-        search_position = (
-            found + len(query)
-        )
-
-    # If the exact query is not present in the snippet because the selected
-    # match is a longer prefix token, highlight the query prefix.
-    if not highlights and query:
-
-        pattern = re.compile(
-            re.escape(query),
-            re.IGNORECASE
-        )
-
-        for match in pattern.finditer(
-            lower_snippet
-        ):
-
-            highlights.append({
-                "start": match.start(),
-                "end": match.end()
-            })
-
-    # Merge overlapping/touching ranges.
-    highlights.sort(
-        key=lambda item: item["start"]
-    )
-
-    merged = []
-
-    for item in highlights:
-
-        if not merged:
-
-            merged.append(item)
-            continue
-
-        previous = merged[-1]
-
-        if item["start"] <= previous["end"]:
-
-            previous["end"] = max(
-                previous["end"],
-                item["end"]
-            )
-
-        else:
-
-            merged.append(item)
-
-    return {
-        "snippet": snippet,
-        "page": page_number,
-        "highlights": merged
-    }
-
-
-
-def sanitize_upload_filename(filename):
-    """
-    Return a safe local filename for an uploaded document.
-
-    Only the final filename is stored in DATA_FOLDER. Directory
-    components are removed to prevent path traversal.
-
-    Returns an empty string when the filename is invalid or the
-    extension is unsupported.
-    """
-
-    if not filename:
-        return ""
-
-    safe_name = secure_filename(
-        os.path.basename(filename)
-    )
-
-    if not safe_name:
-        return ""
-
-    supported_extensions = (
-        ".pdf",
-        ".docx",
-        ".txt",
-    )
-
-    if not safe_name.lower().endswith(
-        supported_extensions
-    ):
-        return ""
-
-    return safe_name
 
 
 # ============================================================
@@ -1939,16 +1125,10 @@ def rebuild_database():
     new_filename_index = {}
     new_page_text_index = {}
 
-    supported_extensions = (
-        ".pdf",
-        ".docx",
-        ".txt",
-    )
-
     for filename in os.listdir(DATA_FOLDER):
 
         if not filename.lower().endswith(
-            supported_extensions
+            SUPPORTED_EXTENSIONS
         ):
             continue
 
@@ -2283,69 +1463,19 @@ def build_paginated_response(
     limit,
 ):
     """
-    Return a stable paginated search response.
+    Serialize an already-ranked result list as an HTTP response.
 
-    Ranking happens before this helper. This function only slices
-    the ranked result list and returns pagination metadata.
+    Pagination itself lives in the core; this adapter only turns the
+    core payload into JSON.
     """
 
-    total = len(results)
-
-    total_pages = (
-        (total + limit - 1) // limit
-        if total > 0
-        else 0
-    )
-
-    if total_pages > 0:
-        page = max(
-            1,
-            min(page, total_pages)
+    return jsonify(
+        paginate(
+            results,
+            page,
+            limit,
         )
-    else:
-        page = max(1, page)
-
-    start_index = (
-        (page - 1) * limit
-        if total_pages > 0
-        else 0
     )
-
-    end_index = (
-        start_index + limit
-    )
-
-    page_results = results[
-        start_index:end_index
-    ]
-
-    return jsonify({
-        "results": page_results,
-        "pagination": {
-            "page": page,
-            "limit": limit,
-            "total": total,
-            "total_pages": total_pages,
-            "has_next":
-                page < total_pages,
-            "has_previous":
-                page > 1
-                and total_pages > 0,
-            "start":
-                (
-                    start_index + 1
-                    if page_results
-                    else 0
-                ),
-            "end":
-                (
-                    start_index
-                    + len(page_results)
-                    if page_results
-                    else 0
-                ),
-        },
-    })
 
 
 @app.route(
@@ -2360,17 +1490,9 @@ def execute_search():
     ).strip()
 
     if not raw_query:
-        return jsonify({
-            "results": [],
-            "pagination": {
-                "page": 1,
-                "limit": 10,
-                "total": 0,
-                "total_pages": 0,
-                "has_next": False,
-                "has_previous": False
-            }
-        })
+        return jsonify(
+            empty_query_response()
+        )
 
     try:
         requested_page = int(request.args.get("page", "1"))
@@ -3583,6 +2705,7 @@ def execute_search():
             )
 
             snippet_info = get_snippet_and_page(
+                active_page_text_index,
                 filename,
                 snippet_words
             )
