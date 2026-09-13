@@ -98,11 +98,136 @@ PAGINATION = [
     ("layer", 3, 50),
 ]
 
+# One query per scoring branch, so a change in any single weight or
+# threshold shows up as a named mismatch instead of hiding inside a
+# generic query list. Comments name the branch each query exercises.
+BRANCH_QUERIES = [
+    # filetype-only browse: flat score, sorted by title
+    "pdf",
+    "docx",
+    "txt",
+
+    # bare-list branch: filetype filter with no scoring document
+    "zzzqqq pdf",
+
+    # bare-list branch: quoted phrase matching nothing
+    '"zzzqqq wwwww"',
+
+    # quoted phrase that matches: phrase weight set 0.05/0.15/0.80/0
+    '"network security"',
+    '"machine learning"',
+
+    # quoted phrase inside a filename: the +100 filename bonus
+    '"Module 2"',
+
+    # quoted filename: the +30 quoted filename bonus
+    '"Network Security Notes.pdf"',
+
+    # exact filename: the +100 bonus
+    "Network Security Notes.pdf",
+
+    # >=2-word filename substring: the +50 bonus
+    "Cyber Security",
+
+    # partial multi-word filename: 0.75 * coverage filename relevance
+    "cyber fundamentals",
+
+    # per-word filename bonus (+20), numeric word skipped
+    "module 2",
+    "502 module",
+
+    # prefix match, len >= 3: similarity len(q)/len(t) clamped 0.25..0.90
+    "netwo",
+    "encrypt",
+    "virtual",
+
+    # numeric substring, digit run >= 2 and not a prefix: ratio * 0.70
+    "502",
+    "999",
+    "12",
+
+    # ordinary topic search: weights 0.05/0.60/0.20/0.15
+    "network",
+    "algorithm",
+    "encryption",
+
+    # no match at all
+    "zzzqqq",
+]
+
+# Of the three bare-list sites in search_engine/search.py, only two are
+# reachable, and only one of those over HTTP against a populated corpus:
+#
+#   1. no documents at all, or no documents of the filtered type. The live
+#      corpus holds all three supported types, so HTTP cannot reach it;
+#      tests/test_search_engine_core.py covers both variants directly.
+#   2. a quoted phrase that no document contains. Reachable here.
+#   3. filetype narrowing that empties document_scores. Unreachable: scores
+#      are pre-populated for every document, and total_documents is counted
+#      through the same filetype predicate, so site 1 always fires first.
+BARE_LIST_QUERIES = [
+    '"zzzqqq wwwww"',
+]
+
 DOCUMENTS = [
     "BCS502_Module_2.pdf",
     "Network_Security_Notes.pdf",
     "Cyber_Security_Fundamentals.txt",
 ]
+
+
+def canonicalize_ranking(payload):
+    """
+    Normalize the order of equal-scoring results, and nothing else.
+
+    Results are sorted by descending score with a stable sort, so documents
+    with identical scores keep the order they were inserted in - and after a
+    rebuild that order is `os.listdir` order of the data folder. Two servers
+    on two filesystem locations therefore legitimately disagree about the
+    order of a tie, while agreeing on every score, snippet and field.
+
+    Sorting each run of equal scores by title removes exactly that
+    deployment-specific freedom. Ordering between distinct scores, and every
+    value inside a result, is still compared exactly.
+
+    Known limit: a tie group split across a page boundary still reports a
+    mismatch, because the two servers put different documents on the page.
+    The durable fix is deterministic enumeration in rebuild, which is a
+    behavior change and is reported separately rather than made here.
+    """
+
+    if not isinstance(payload, dict):
+        return payload
+
+    if "results" not in payload or "pagination" not in payload:
+        return payload
+
+    results = payload["results"]
+
+    ordered = []
+    group = []
+    previous = None
+
+    for item in results:
+
+        if group and item.get("score") != previous:
+            ordered.extend(
+                sorted(group, key=lambda entry: entry.get("title", ""))
+            )
+            group = []
+
+        group.append(item)
+        previous = item.get("score")
+
+    if group:
+        ordered.extend(
+            sorted(group, key=lambda entry: entry.get("title", ""))
+        )
+
+    canonical = dict(payload)
+    canonical["results"] = ordered
+
+    return canonical
 
 
 def normalize(payload):
@@ -117,10 +242,13 @@ def normalize(payload):
         "data_folder" the data folder itself, reported by /api/status
         "indexing"    wall-clock timestamps and the generation counter
 
+    A fourth difference is the order of equal-scoring results, handled by
+    canonicalize_ranking once the paths above are reduced.
+
     Everything else — ranking order, scores, snippets, highlight offsets,
     pagination, match types, tags — is behavior, and is compared exactly.
-    Normalizing only these keys is what lets the diff stay meaningful after
-    a rebuild rewrites stored paths.
+    Normalizing only these is what lets the diff stay meaningful after a
+    rebuild rewrites stored paths.
     """
 
     if isinstance(payload, dict):
@@ -136,7 +264,7 @@ def normalize(payload):
             else:
                 normalized[key] = normalize(value)
 
-        return normalized
+        return canonicalize_ranking(normalized)
 
     if isinstance(payload, list):
         return [normalize(item) for item in payload]
@@ -221,6 +349,34 @@ def main(argv=None):
             f"/api/search?q={query!r}",
             fetch(OLD, "GET", "/api/search", params={"q": query}),
             fetch(NEW, "GET", "/api/search", params={"q": query}),
+        )
+
+    for query in BRANCH_QUERIES:
+        checks += 1
+        failures += compare(
+            f"/api/search?q={query!r} [branch]",
+            fetch(OLD, "GET", "/api/search", params={"q": query}),
+            fetch(NEW, "GET", "/api/search", params={"q": query}),
+        )
+
+    # Guard the quirk itself: if these ever come back as a paginated
+    # object, the corpus no longer exercises the bare-list branches and
+    # the sweep would be silently weaker.
+    for query in BARE_LIST_QUERIES:
+
+        old_shape = type(
+            fetch(OLD, "GET", "/api/search", params={"q": query})[1]
+        ).__name__
+
+        new_shape = type(
+            fetch(NEW, "GET", "/api/search", params={"q": query})[1]
+        ).__name__
+
+        checks += 1
+        failures += compare(
+            f"/api/search?q={query!r} reaches the bare-list branch",
+            ["list", "list"],
+            [old_shape, new_shape],
         )
 
     for query, page, limit in PAGINATION:

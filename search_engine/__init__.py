@@ -76,6 +76,10 @@ from search_engine.results import (
     ImportResult,
 )
 
+from search_engine.search import (
+    search_documents,
+)
+
 from search_engine.snippets import (
     build_snippet_result,
     count_phrase_occurrences,
@@ -140,6 +144,7 @@ __all__ = [
     "parse_filetype_filter",
     "read_json_snapshot",
     "sanitize_upload_filename",
+    "search_documents",
     "secure_filename",
     "tokenize",
     "tokenize_filename",

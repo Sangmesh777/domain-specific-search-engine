@@ -31,6 +31,9 @@ from search_engine.config import (
 from search_engine.engine import (
     SearchEngine,
 )
+from search_engine.pagination import (
+    empty_query_response,
+)
 from search_engine.results import (
     DELETE_DELETED,
     DELETE_FILE_NOT_FOUND,
@@ -1289,6 +1292,875 @@ def test_status_generation_advances_on_ready(engine, tmp_path):
     )
 
     assert engine.index_status()["generation"] > first
+
+
+# ============================================================
+# SEARCH
+# ============================================================
+#
+# The ranking pipeline moved out of app.py into search_engine/search.py
+# byte for byte. tools/verify_http_parity.py is what proves the ranking
+# itself did not change: it diffs this build against the pre-refactor
+# monolith over ~80 queries.
+#
+# These tests pin the contract around it, which parity cannot:
+#
+#   - the payload shapes, including the three legacy bare-list branches
+#   - parameter clamping policy
+#   - snapshot isolation, i.e. that a search reads one coherent view
+#   - that search reflects mutations with no restart and survives a rebuild
+#
+# Scores are deliberately not hardcoded. They are the product's tuned
+# behavior; asserting relationships and ranges keeps these tests honest
+# about the contract without duplicating the parity tool's job.
+
+
+SEARCH_MATCH_TYPES = {
+    "Filename + Phrase",
+    "Phrase Match",
+    "Filename + Content",
+    "Filename Match",
+    "Content Match",
+}
+
+
+# Import sanitizes upload names (spaces become underscores), so these are
+# the filenames that actually reach the index and the search results.
+# `title` is that same sanitized filename, extension included.
+NETWORK_NOTES = "Network_Notes.pdf"
+NETWORK_SECURITY_GUIDE = "Network_Security_Guide.pdf"
+DATABASE_GUIDE = "Database_Guide.docx"
+MACHINE_LEARNING = "machine_learning.txt"
+
+
+@pytest.fixture
+def search_corpus(tmp_path):
+    """
+    A corpus designed so each ranking branch has a document that reaches it.
+
+    Each file exists to trigger one specific signal:
+
+        Network Notes.pdf           exact numeric token 999, and a numeric
+                                    run buried inside unique777marker
+        Network Security Guide.pdf  a >=2-word filename substring, plus an
+                                    adjacent "alpha beta" phrase
+        Database Guide.docx         content-only matches, and "alpha"/"beta"
+                                    present but NOT adjacent
+        machine learning.txt        a phrase repeated several times, which is
+                                    also the document's own filename
+    """
+
+    directory = str(tmp_path / "search_corpus")
+
+    os.makedirs(directory, exist_ok=True)
+
+    return [
+        make_pdf(
+            directory,
+            "Network Notes.pdf",
+            [
+                "Computer network fundamentals and the OSI model",
+                "Routing protocols such as BGP and OSPF reference 999",
+                "The token unique777marker hides a numeric run",
+            ],
+        ),
+        make_pdf(
+            directory,
+            "Network Security Guide.pdf",
+            [
+                "Firewalls filter traffic between network zones",
+                "alpha beta appear adjacent in this document",
+            ],
+        ),
+        make_docx(
+            directory,
+            "Database Guide.docx",
+            [
+                "Normalization removes redundancy from relations",
+                "alpha appears here and beta appears much later",
+            ],
+        ),
+        make_txt(
+            directory,
+            "machine learning.txt",
+            "machine learning models and machine learning datasets\n"
+            "machine learning studies learning systems\n",
+        ),
+    ]
+
+
+@pytest.fixture
+def search_engine(engine, search_corpus):
+    """An engine holding the search corpus, verified consistent."""
+
+    result = import_paths(engine, search_corpus)
+
+    assert result.rejected == []
+    assert result.failed == []
+    assert result.uploaded_count == 4
+
+    assert_consistent(engine)
+
+    return engine
+
+
+def titles(payload):
+    """Result titles in ranked order."""
+
+    return [
+        item["title"]
+        for item in payload["results"]
+    ]
+
+
+def paths(payload):
+    """Result paths in ranked order."""
+
+    return [
+        item["path"]
+        for item in payload["results"]
+    ]
+
+
+def ends_with(payload, filename):
+    """True when one result points at `filename`."""
+
+    return any(
+        item["path"].endswith(filename)
+        for item in payload["results"]
+    )
+
+
+# ------------------------------------------------------------
+# blank query
+# ------------------------------------------------------------
+
+def test_search_blank_query_returns_the_empty_shape(search_engine):
+    """
+    A blank query is answered before any ranking work.
+
+    Its payload keeps the historical shape, which carries no start/end
+    offsets; empty_query_response() is the single definition of it.
+    """
+
+    assert search_engine.search("") == empty_query_response()
+
+    assert search_engine.search("   ") == empty_query_response()
+
+
+def test_search_trims_the_query(search_engine):
+    """Padding is query normalization, so it belongs in the core."""
+
+    assert search_engine.search("  network  ") == search_engine.search("network")
+
+
+# ------------------------------------------------------------
+# the three legacy bare-list branches
+# ------------------------------------------------------------
+
+def test_search_on_empty_corpus_returns_bare_list(engine):
+    """
+    No documents at all: the historical API answers `[]`, not a page object.
+
+    This branch is unreachable on a live corpus, which is exactly why the
+    parity sweep cannot cover it and a core test must.
+    """
+
+    assert engine.search("network") == []
+
+
+def test_search_quoted_phrase_without_match_returns_bare_list(search_engine):
+    """A quoted phrase nothing contains: `[]`, by the same legacy contract."""
+
+    assert search_engine.search('"zzzqqq wwwww"') == []
+
+
+def test_search_filetype_filter_that_matches_nothing_returns_empty_page(
+    search_engine,
+):
+    """
+    A filetype that does exist, plus keywords nothing matches: empty page.
+
+    Not a bare list. document_scores is pre-populated for every document
+    before scoring, so narrowing it by a present filetype cannot empty it
+    and the bare-list site for that case is unreachable. Pinned because the
+    asymmetry with the next test is otherwise invisible.
+    """
+
+    payload = search_engine.search("zzzqqq pdf")
+
+    assert isinstance(payload, dict)
+    assert payload["results"] == []
+    assert payload["pagination"]["total"] == 0
+
+
+def test_search_filetype_with_no_documents_returns_bare_list(engine, tmp_path):
+    """
+    The reachable filetype bare-list branch: zero documents of that type.
+
+    total_documents is counted through the same filetype predicate, so a
+    corpus of PDFs asked for `docx` has nothing to search and answers with
+    the legacy bare list.
+    """
+
+    import_paths(engine, [
+        make_pdf(
+            str(tmp_path / "only_pdf"),
+            "Single.pdf",
+            ["The only document in this corpus"],
+        ),
+    ])
+
+    assert engine.search("only")["pagination"]["total"] == 1
+
+    # Keywords plus an absent type reach the bare-list branch.
+    assert engine.search("single docx") == []
+
+    # The type on its own does not: the browse branch runs first and
+    # answers with an empty page object. Another pinned asymmetry.
+    browse = engine.search("docx")
+
+    assert isinstance(browse, dict)
+    assert browse["results"] == []
+    assert browse["pagination"]["total"] == 0
+
+
+def test_search_no_match_without_filter_returns_empty_page(search_engine):
+    """
+    With no filetype filter the same miss is a normal empty page.
+
+    Pinned alongside the three branches above because the asymmetry is
+    surprising and is part of the published behavior.
+    """
+
+    payload = search_engine.search("zzzqqq")
+
+    assert isinstance(payload, dict)
+    assert payload["results"] == []
+    assert payload["pagination"]["total"] == 0
+    assert payload["pagination"]["total_pages"] == 0
+
+
+# ------------------------------------------------------------
+# filetype-only browse
+# ------------------------------------------------------------
+
+def test_search_filetype_only_is_a_browse_operation(search_engine):
+    """
+    `pdf` alone lists documents; it does not rank them.
+
+    Flat score, title order, and a snippet that says what happened.
+    """
+
+    payload = search_engine.search("pdf")
+
+    assert payload["pagination"]["total"] == 2
+
+    for item in payload["results"]:
+
+        assert item["tag"] == "Filtered Result"
+        assert item["match_type"] == "File Type: PDF"
+        assert item["snippet"] == "Filtered by file type: PDF"
+        assert item["score"] == 1.0
+        assert item["relevance_score"] == 1.0
+        assert item["page"] is None
+        assert item["highlights"] == []
+        assert item["filename_score"] == 0.0
+        assert item["content_score"] == 0.0
+        assert item["phrase_score"] == 0.0
+        assert item["path"].lower().endswith(".pdf")
+
+    assert titles(payload) == sorted(
+        titles(payload),
+        key=str.lower,
+    )
+
+
+def test_search_filetype_only_covers_every_supported_type(search_engine):
+
+    assert search_engine.search("pdf")["pagination"]["total"] == 2
+    assert search_engine.search("docx")["pagination"]["total"] == 1
+    assert search_engine.search("txt")["pagination"]["total"] == 1
+
+
+# ------------------------------------------------------------
+# result contract
+# ------------------------------------------------------------
+
+def test_search_results_carry_the_documented_fields(search_engine):
+
+    payload = search_engine.search("network")
+
+    assert payload["results"]
+
+    for item in payload["results"]:
+
+        assert item["tag"] == "Ranked Result"
+        assert item["score"] > 0
+        assert item["match_type"] in SEARCH_MATCH_TYPES
+        assert item["filetype_filter"] is None
+        assert isinstance(item["snippet"], str)
+        assert isinstance(item["highlights"], list)
+        assert isinstance(item["phrase_occurrences"], int)
+
+        for key in (
+            "filename_score",
+            "content_score",
+            "phrase_score",
+            "lexical_match_relevance",
+            "prefix_similarity",
+            "numeric_similarity",
+        ):
+            assert isinstance(item[key], float)
+
+
+def test_search_result_urls_point_at_the_document_resource(search_engine):
+    """
+    The three URL fields are one resource path plus a page fragment.
+
+    They are produced by the core so both adapters share a result shape:
+    an online Android client uses them as-is, an offline one uses `path`.
+    """
+
+    payload = search_engine.search("network")
+
+    for item in payload["results"]:
+
+        assert item["document_url"].startswith("/api/documents/")
+
+        # A filename with spaces must be percent-encoded to be a valid path.
+        assert " " not in item["document_url"]
+
+        assert item["open_url"] == item["page_url"]
+
+        if item["page"] is None:
+            assert item["page_url"] == item["document_url"]
+        else:
+            assert item["page_url"] == (
+                f"{item['document_url']}#page={item['page']}"
+            )
+
+
+def test_search_results_are_ranked_by_descending_score(search_engine):
+
+    payload = search_engine.search("network")
+
+    scores = [item["score"] for item in payload["results"]]
+
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_search_is_deterministic(search_engine):
+    """Same corpus, same query, byte-identical payload."""
+
+    assert (
+        search_engine.search("network security")
+        == search_engine.search("network security")
+    )
+
+
+# ------------------------------------------------------------
+# matching signals
+# ------------------------------------------------------------
+
+def test_search_exact_filename_outranks_a_content_match(search_engine):
+    """
+    Naming the file is the strongest possible signal.
+
+    The +100 exact filename bonus must put that document first, ahead of
+    documents that merely discuss the same words.
+    """
+
+    payload = search_engine.search("Network Security Guide.pdf")
+
+    assert ends_with(payload, NETWORK_SECURITY_GUIDE)
+
+    top = payload["results"][0]
+
+    assert top["title"] == NETWORK_SECURITY_GUIDE
+    assert top["filename_score"] >= 100
+
+
+def test_search_two_word_filename_substring_scores(search_engine):
+    """A >=2-word run inside a filename earns the substring bonus."""
+
+    payload = search_engine.search("Network Security")
+
+    top = payload["results"][0]
+
+    assert top["title"] == NETWORK_SECURITY_GUIDE
+    assert top["filename_score"] >= 50
+
+
+def test_search_content_only_match_reports_tfidf(search_engine):
+    """
+    A word that appears only in document text, never in a filename.
+
+    This is the pure TF-IDF path: no filename signal, no phrase.
+    """
+
+    payload = search_engine.search("normalization")
+
+    assert payload["pagination"]["total"] >= 1
+    assert ends_with(payload, DATABASE_GUIDE)
+
+    top = payload["results"][0]
+
+    assert top["title"] == DATABASE_GUIDE
+    assert top["match_type"] == "Content Match"
+    assert top["content_score"] > 0
+    assert top["filename_score"] == 0.0
+
+
+def test_search_prefix_match_stays_inside_its_clamp(search_engine):
+    """
+    Prefix similarity is len(query)/len(term), clamped to 0.25 .. 0.90.
+
+    Asserting the clamp rather than a value keeps the test meaningful for
+    any corpus while still catching a removed or widened bound.
+    """
+
+    payload = search_engine.search("netwo")
+
+    assert payload["results"]
+
+    top = payload["results"][0]
+
+    assert 0.25 <= top["prefix_similarity"] <= 0.90
+    assert top["lexical_match_relevance"] > 0
+
+
+def test_search_exact_numeric_token_is_a_lexical_exact_match(search_engine):
+    """A digit run that is itself an indexed term matches exactly."""
+
+    payload = search_engine.search("999")
+
+    assert ends_with(payload, NETWORK_NOTES)
+
+    top = payload["results"][0]
+
+    assert top["exact_content_match"] is True
+    assert top["lexical_match_relevance"] == 1.0
+
+
+def test_search_numeric_substring_inside_a_longer_token(search_engine):
+    """
+    777 is not a term; it is a run inside unique777marker.
+
+    The numeric branch scores it at ratio * 0.70, clamped to 0.20 .. 0.65,
+    which must stay strictly below the exact-match weight of 1.0.
+    """
+
+    payload = search_engine.search("777")
+
+    assert ends_with(payload, NETWORK_NOTES)
+
+    top = payload["results"][0]
+
+    assert 0.20 <= top["numeric_similarity"] <= 0.65
+    assert top["exact_content_match"] is not True
+    assert top["lexical_match_relevance"] < 1.0
+
+
+def test_search_quoted_phrase_counts_occurrences(search_engine):
+    """
+    Phrase score grows with occurrences, log-scaled.
+
+    The corpus repeats "machine learning" three times in one document.
+
+    phrase_score is deliberately not asserted against a ceiling: a phrase
+    that is also the document's own filename earns the occurrence score
+    plus a filename bonus, so the total legitimately exceeds the 100 the
+    occurrence formula alone is capped at (observed 167.07 here).
+    """
+
+    payload = search_engine.search('"machine learning"')
+
+    assert ends_with(payload, MACHINE_LEARNING)
+
+    top = payload["results"][0]
+
+    assert top["phrase_occurrences"] == 3
+    assert top["phrase_score"] > 100
+    assert top["match_type"] == "Filename + Phrase"
+
+
+def test_search_quoted_phrase_filters_out_non_adjacent_documents(search_engine):
+    """
+    Quoting means adjacent.
+
+    Both PDF/DOCX documents contain "alpha" and "beta", but only one has
+    them side by side. The other must be dropped entirely, not merely
+    outranked - that is the quoted filter, and it is why the branch can
+    return a bare list.
+    """
+
+    payload = search_engine.search('"alpha beta"')
+
+    assert ends_with(payload, NETWORK_SECURITY_GUIDE)
+    assert not ends_with(payload, DATABASE_GUIDE)
+
+
+def test_search_unquoted_words_do_not_filter(search_engine):
+    """
+    The same two words unquoted keep both documents.
+
+    Pinned against the test above so the difference is provably the
+    quoting, not the vocabulary.
+    """
+
+    payload = search_engine.search("alpha beta")
+
+    assert ends_with(payload, NETWORK_SECURITY_GUIDE)
+    assert ends_with(payload, DATABASE_GUIDE)
+
+
+def test_search_combines_filetype_filter_with_keywords(search_engine):
+    """
+    `network pdf` narrows by type and still ranks.
+
+    Unlike the browse branch, this goes through the full pipeline, so the
+    filetype_filter field is set on every result.
+    """
+
+    payload = search_engine.search("network pdf")
+
+    assert payload["results"]
+
+    for item in payload["results"]:
+
+        assert item["filetype_filter"] == "pdf"
+        assert item["path"].lower().endswith(".pdf")
+
+    assert not ends_with(payload, DATABASE_GUIDE)
+    assert not ends_with(payload, MACHINE_LEARNING)
+
+
+# ------------------------------------------------------------
+# pagination policy
+# ------------------------------------------------------------
+
+def test_search_clamps_limit_into_range(search_engine):
+
+    assert search_engine.search(
+        "network", 1, 0
+    )["pagination"]["limit"] == 1
+
+    assert search_engine.search(
+        "network", 1, -5
+    )["pagination"]["limit"] == 1
+
+    assert search_engine.search(
+        "network", 1, 9999
+    )["pagination"]["limit"] == 50
+
+
+def test_search_clamps_page_to_at_least_one(search_engine):
+
+    assert search_engine.search(
+        "network", 0, 10
+    )["pagination"]["page"] == 1
+
+    assert search_engine.search(
+        "network", -5, 10
+    )["pagination"]["page"] == 1
+
+
+def test_search_page_beyond_the_end_clamps_to_the_last_page(search_engine):
+    """
+    An out-of-range page returns the last page, not an empty one.
+
+    Surprising, and therefore worth pinning: paginate() clamps page to
+    total_pages whenever there is at least one page.
+    """
+
+    payload = search_engine.search("network", 999, 1)
+
+    pagination = payload["pagination"]
+
+    assert pagination["total_pages"] >= 1
+    assert pagination["page"] == pagination["total_pages"]
+    assert pagination["has_next"] is False
+    assert pagination["has_previous"] is True
+    assert payload["results"]
+
+
+def test_search_pages_partition_the_result_set(search_engine):
+    """
+    limit=1 pages must tile the full result list with no gaps or repeats.
+
+    This is the property a UI paginator depends on.
+    """
+
+    # "network" reaches two documents in this corpus, so limit=1 must
+    # produce exactly two pages to tile.
+    full = search_engine.search("network", 1, 50)
+
+    total = full["pagination"]["total"]
+
+    assert total >= 2, "corpus no longer paginates this query"
+
+    collected = []
+
+    for page in range(1, total + 1):
+
+        chunk = search_engine.search("network", page, 1)
+
+        assert chunk["pagination"]["page"] == page
+        assert len(chunk["results"]) == 1
+
+        collected.append(chunk["results"][0]["path"])
+
+    assert collected == [item["path"] for item in full["results"]]
+
+
+# ------------------------------------------------------------
+# snapshots and mutation visibility
+# ------------------------------------------------------------
+
+def test_search_accepts_a_caller_supplied_snapshot(search_engine):
+    """
+    A caller may reuse one coherent read view across several queries.
+
+    The default path must produce the same payload as an explicit snapshot
+    taken immediately before it.
+    """
+
+    snapshot = search_engine.snapshot()
+
+    assert search_engine.search(
+        "network",
+        snapshot=snapshot,
+    ) == search_engine.search("network")
+
+
+def test_snapshot_isolates_a_search_from_a_rebuild(search_engine):
+    """
+    The guarantee a snapshot actually provides, and the reason it exists.
+
+    rebuild() builds four fresh dicts and swaps all four references at once,
+    so a view captured beforehand keeps ranking against the corpus as it
+    was. That is what stops a background rebuild - which the Flask adapter
+    runs on a worker thread - from tearing a result set in half mid-request.
+    """
+
+    snapshot = search_engine.snapshot()
+
+    before = search_engine.search("normalization", snapshot=snapshot)
+
+    assert ends_with(before, DATABASE_GUIDE)
+
+    # Remove the document from disk and rebuild behind the snapshot's back.
+    os.remove(
+        search_engine.resolve_document_path(DATABASE_GUIDE)
+    )
+
+    search_engine.rebuild(log=lambda *args: None)
+
+    frozen = search_engine.search("normalization", snapshot=snapshot)
+
+    assert frozen == before
+
+    fresh = search_engine.search("normalization")
+
+    assert not ends_with(fresh, DATABASE_GUIDE)
+
+
+def test_snapshot_shares_live_dicts_with_incremental_mutations(search_engine):
+    """
+    The limit of that guarantee, stated plainly instead of discovered later.
+
+    A snapshot holds references to the four live dicts, not copies, so an
+    in-place delete or import is visible through it immediately. That is the
+    same visibility the pre-refactor handler had - it read those module-level
+    dicts directly - and it is exactly why rebuild() swaps references rather
+    than mutating them. Pinned so nobody mistakes snapshot() for a deep copy
+    and builds a concurrency argument on top of it.
+    """
+
+    snapshot = search_engine.snapshot()
+
+    before = search_engine.search("normalization", snapshot=snapshot)
+
+    assert ends_with(before, DATABASE_GUIDE)
+
+    result = search_engine.delete(DATABASE_GUIDE)
+
+    assert result.outcome == DELETE_DELETED
+
+    frozen = search_engine.search("normalization", snapshot=snapshot)
+
+    assert not ends_with(frozen, DATABASE_GUIDE)
+
+    assert frozen == search_engine.search("normalization")
+
+
+def test_search_sees_an_import_without_a_restart(search_engine, tmp_path):
+    """
+    Offline mode has no server to bounce: import then search, immediately.
+    """
+
+    assert search_engine.search("kubernetes")["results"] == []
+
+    import_paths(search_engine, [
+        make_txt(
+            str(tmp_path / "extra"),
+            "kubernetes.txt",
+            "kubernetes orchestrates containers\n",
+        ),
+    ])
+
+    payload = search_engine.search("kubernetes")
+
+    assert payload["pagination"]["total"] == 1
+    assert ends_with(payload, "kubernetes.txt")
+
+
+def test_search_sees_a_bulk_delete_immediately(search_engine):
+    """The same visibility guarantee for the batch path."""
+
+    assert ends_with(search_engine.search("network"), NETWORK_NOTES)
+
+    result = search_engine.bulk_delete([
+        NETWORK_NOTES,
+        NETWORK_SECURITY_GUIDE,
+    ])
+
+    assert result.deleted_count == 2
+
+    payload = search_engine.search("network")
+
+    assert not ends_with(payload, NETWORK_NOTES)
+    assert not ends_with(payload, NETWORK_SECURITY_GUIDE)
+
+
+def test_rebuild_preserves_search_results(search_engine):
+    """
+    Rebuild is a persistence operation, not a re-ranking.
+
+    Compared as a sorted (title, score) multiset rather than payload
+    equality: tied scores keep insertion order, and rebuild enumerates the
+    data folder with os.listdir, whose order is filesystem-specific, so
+    equal-scoring documents may legitimately come back in a different order.
+    Exact list equality would assert an implementation detail that is not
+    stable across deployments. test_rebuild_is_order_stable_in_place pins
+    the part that is.
+    """
+
+    queries = [
+        "network",
+        "network security",
+        '"machine learning"',
+        "normalization",
+        "777",
+        "pdf",
+    ]
+
+    before = {
+        query: sorted(
+            (item["title"], item["score"])
+            for item in search_engine.search(query)["results"]
+        )
+        for query in queries
+    }
+
+    search_engine.rebuild(log=lambda *args: None)
+
+    assert_consistent(search_engine)
+
+    after = {
+        query: sorted(
+            (item["title"], item["score"])
+            for item in search_engine.search(query)["results"]
+        )
+        for query in queries
+    }
+
+    assert after == before
+
+
+def test_rebuild_is_order_stable_in_place(search_engine):
+    """
+    Rebuilding the same folder repeatedly must not shuffle results.
+
+    The companion to the multiset comparison above, and the part that IS a
+    guarantee: two rebuilds of one data folder enumerate identically, so
+    tied scores come back in the same order every time. Search is therefore
+    stable across background rebuilds on one device, which is what an
+    offline Android client actually needs.
+
+    Compared from the first rebuild onward, because a search before any
+    rebuild still reflects import order rather than enumeration order.
+    """
+
+    query = "network"
+
+    search_engine.rebuild(log=lambda *args: None)
+
+    settled = search_engine.search(query)
+
+    for _ in range(2):
+
+        search_engine.rebuild(log=lambda *args: None)
+
+        assert search_engine.search(query) == settled
+
+    assert_consistent(search_engine)
+
+
+@pytest.mark.xfail(
+    reason=(
+        "KNOWN PRE-EXISTING DEFECT, not a refactor regression. "
+        "storage.py deduplicates filename words with set(filename_words) "
+        "before INSERT, so the persisted row order follows PYTHONHASHSEED "
+        "rather than tokenization order. On reload, FILENAME_INDEX is "
+        "rebuilt with SELECT ... ORDER BY filename, rowid, so a document's "
+        "word order can come back permuted. search.py compares "
+        "the normalized phrase against a space-joined word list, which is "
+        "order-sensitive, so the +100 exact-filename, +50 substring and "
+        "phrase-in-filename bonuses can be lost across a restart. Present "
+        "identically in the pre-refactor monolith (81faff9, app.py lines "
+        "1239 and 1669). Fix is dict.fromkeys(filename_words) at both "
+        "sites; deliberately not applied inside a behavior-preserving "
+        "refactor. This test XPASSes when that fix lands."
+    ),
+    strict=False,
+)
+def test_search_after_restart_matches_search_before_it(
+    search_engine,
+    data_folder,
+):
+    """
+    A reopened engine must rank identically.
+
+    This is the offline Android promise: the persisted index is not a
+    degraded copy of the in-memory one. It currently is not guaranteed, for
+    the reason recorded in the xfail marker above.
+    """
+
+    queries = [
+        "network",
+        "normalization",
+        '"machine learning"',
+        "netwo",
+        "pdf",
+    ]
+
+    before = {
+        query: search_engine.search(query)
+        for query in queries
+    }
+
+    reopened = SearchEngine(EngineConfig(data_folder=data_folder))
+
+    reopened.load()
+
+    after = {
+        query: reopened.search(query)
+        for query in queries
+    }
+
+    assert after == before
 
 
 def test_engine_has_no_web_stack_dependency():

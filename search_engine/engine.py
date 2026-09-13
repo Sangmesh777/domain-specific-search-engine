@@ -65,6 +65,9 @@ from search_engine.results import (
     DeleteResult,
     ImportResult,
 )
+from search_engine.search import (
+    search_documents,
+)
 from search_engine.status import (
     IndexStatusTracker,
 )
@@ -168,6 +171,52 @@ class SearchEngine:
         self.mark_ready()
 
         return self.status()
+
+    # --------------------------------------------------------
+    # SEARCH
+    # --------------------------------------------------------
+
+    def search(
+        self,
+        raw_query,
+        requested_page=1,
+        requested_limit=10,
+        snapshot=None,
+    ):
+        """
+        Rank the corpus for one query.
+
+        This is the single search implementation in the system. The Flask
+        route and an offline Android search screen both call it and get the
+        same payload for the same corpus, which is the whole point of the
+        split.
+
+        `raw_query` is the user's text, untrimmed. Splitting it into keywords
+        and a filetype filter is domain logic, so it happens here rather than
+        in an adapter.
+
+        `requested_page` and `requested_limit` are already integers; turning
+        query strings into integers is HTTP parsing and stays in the adapter.
+        Clamping (page >= 1, 1 <= limit <= 50) is policy and happens here.
+
+        `snapshot` lets a caller reuse one coherent read view across several
+        queries; by default a fresh one is taken.
+
+        Returns a JSON-ready payload. Normally that is the paginated object;
+        three legacy branches answer with a bare list instead. Both shapes
+        are part of the published API and are preserved deliberately, so
+        adapters serialize whatever comes back and add nothing.
+        """
+
+        if snapshot is None:
+            snapshot = self.state.snapshot()
+
+        return search_documents(
+            snapshot,
+            raw_query,
+            requested_page,
+            requested_limit,
+        )
 
     # --------------------------------------------------------
     # INTROSPECTION
