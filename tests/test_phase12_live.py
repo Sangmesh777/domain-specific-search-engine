@@ -23,6 +23,32 @@ PREFIX = "pytest_phase12_"
 TEST_COUNT = 5
 
 
+def server_available():
+    """True when the live API is reachable."""
+
+    try:
+        requests.get(
+            f"{BASE_URL}/api/status",
+            timeout=2,
+        )
+        return True
+    except requests.RequestException:
+        return False
+
+
+# These are live HTTP regression tests. They assert real server behavior,
+# so they are skipped (never silently passed) when no server is running.
+# Use ./run_tests.sh to start the server, seed the corpus and run the
+# whole gate in one command.
+pytestmark = pytest.mark.skipif(
+    not server_available(),
+    reason=(
+        "live API regression tests require a server at "
+        f"{BASE_URL} (python app.py, or ./run_tests.sh)"
+    ),
+)
+
+
 def api_json(method, path, **kwargs):
     kwargs.setdefault("timeout", 60)
 
