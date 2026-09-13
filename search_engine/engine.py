@@ -247,6 +247,42 @@ class SearchEngine:
 
         return self.state.get_document_metadata(filename)
 
+    def get_document(self, filename):
+        """
+        Everything an adapter needs to open one document, in a single call.
+
+        Returns None when the document is not indexed. Otherwise:
+
+            filename    the indexed name
+            metadata    title, path, total_words, page_count (a copy)
+            path        resolved absolute path, guaranteed inside the data
+                        folder, or None when the name escapes it
+            exists      whether that path is really on disk
+
+        Metadata and path resolution already existed separately, and the web
+        adapter combines them itself. An offline client has to do the same
+        thing to open a local file, and would otherwise have to reimplement
+        the containment check - which is the one piece of this that is a
+        security boundary rather than a convenience.
+        """
+
+        metadata = self.state.get_document_metadata(filename)
+
+        if metadata is None:
+            return None
+
+        path = self.resolve_document_path(filename)
+
+        return {
+            "filename": filename,
+            "metadata": metadata,
+            "path": path,
+            "exists": (
+                path is not None
+                and os.path.isfile(path)
+            ),
+        }
+
     def document_term_counts(self, filename):
         """Terms one document contributes, per SQLite."""
 

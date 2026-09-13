@@ -2163,6 +2163,96 @@ def test_search_after_restart_matches_search_before_it(
     assert after == before
 
 
+def test_get_document_returns_metadata_and_a_usable_path(engine, tmp_path):
+    """
+    One call gives an offline client everything it needs to open a file.
+
+    The path must be absolute, real, and inside the data folder - that last
+    property is the security boundary, not a convenience.
+    """
+
+    seeded = seeded_engine(engine, tmp_path)
+
+    document = seeded.get_document("Network_Notes.pdf")
+
+    assert document is not None
+    assert document["filename"] == "Network_Notes.pdf"
+    assert document["exists"] is True
+
+    metadata = document["metadata"]
+
+    assert metadata["title"] == "Network_Notes.pdf"
+    assert metadata["total_words"] > 0
+    assert metadata["page_count"] >= 1
+
+    path = document["path"]
+
+    assert os.path.isabs(path)
+    assert os.path.isfile(path)
+
+    folder = os.path.realpath(seeded.config.data_folder)
+
+    assert os.path.commonpath([folder, os.path.realpath(path)]) == folder
+
+    # The metadata is a copy, so a caller cannot corrupt the index through it.
+    metadata["title"] = "tampered"
+
+    assert (
+        seeded.get_document("Network_Notes.pdf")["metadata"]["title"]
+        == "Network_Notes.pdf"
+    )
+
+
+def test_get_document_unknown_returns_none(engine, tmp_path):
+
+    seeded = seeded_engine(engine, tmp_path)
+
+    assert seeded.get_document("nope.pdf") is None
+
+
+def test_get_document_rejects_an_escaping_name(engine, tmp_path):
+    """
+    A traversal name is not indexed, so there is nothing to return.
+
+    Pinned because the interesting failure mode would be a path outside the
+    data folder leaking out through this convenience method.
+    """
+
+    seeded = seeded_engine(engine, tmp_path)
+
+    assert seeded.get_document("../../etc/passwd") is None
+
+    assert seeded.get_document("..") is None
+
+
+def test_get_document_reports_a_file_missing_from_disk(engine, tmp_path):
+    """
+    Indexed but deleted behind the engine's back: exists must say so.
+
+    An offline client has to distinguish "never indexed" from "the user
+    cleared it from a file manager", because only the second is fixable by
+    a rebuild.
+    """
+
+    seeded = seeded_engine(engine, tmp_path)
+
+    filename = "Network_Notes.pdf"
+
+    os.remove(seeded.resolve_document_path(filename))
+
+    document = seeded.get_document(filename)
+
+    assert document is not None
+    assert document["exists"] is False
+    assert document["metadata"]["title"] == filename
+
+    seeded.rebuild(log=lambda *args: None)
+
+    assert seeded.get_document(filename) is None
+
+    assert_consistent(seeded)
+
+
 def test_engine_has_no_web_stack_dependency():
     """
     The core must be usable with no web stack installed.
