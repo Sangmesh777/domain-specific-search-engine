@@ -334,7 +334,18 @@ class SqliteStore:
                 filename_words,
             ) in snapshot.filename_index.items():
 
-                # Store unique terms only.
+                # Unique terms, in tokenization order.
+                #
+                # dict.fromkeys deduplicates exactly as the set() that was
+                # here before did, but keeps the order the filename is
+                # actually written in. That order is not cosmetic: search
+                # joins these words with spaces and compares phrases and
+                # filename substrings against the result, so a permuted row
+                # order silently drops the exact-filename, substring and
+                # phrase-in-filename bonuses after the next restart.
+                #
+                # set() iteration order follows PYTHONHASHSEED, which made
+                # ranking vary between processes for the same corpus.
                 connection.executemany(
                     """
                     INSERT OR IGNORE INTO filename_terms
@@ -346,7 +357,7 @@ class SqliteStore:
                             filename,
                             term,
                         )
-                        for term in set(filename_words)
+                        for term in dict.fromkeys(filename_words)
                     ],
                 )
 
@@ -582,6 +593,10 @@ class SqliteStore:
             ],
         )
 
+        # Unique terms, in tokenization order - see the longer note in
+        # sync_from_snapshot. This is the incremental path, so a document
+        # imported here must persist identically to one written by a
+        # rebuild, or a restart would rank it differently.
         connection.executemany(
             """
             INSERT OR IGNORE INTO filename_terms
@@ -593,7 +608,7 @@ class SqliteStore:
                     filename,
                     term,
                 )
-                for term in set(filename_words)
+                for term in dict.fromkeys(filename_words)
             ],
         )
 

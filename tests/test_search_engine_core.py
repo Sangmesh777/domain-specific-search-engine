@@ -19,7 +19,10 @@ ghost posting behind.
 """
 
 import os
+import shutil
 import sqlite3
+import subprocess
+import sys
 
 import pytest
 
@@ -2108,24 +2111,187 @@ def test_rebuild_is_order_stable_in_place(search_engine):
     assert_consistent(search_engine)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN PRE-EXISTING DEFECT, not a refactor regression. "
-        "storage.py deduplicates filename words with set(filename_words) "
-        "before INSERT, so the persisted row order follows PYTHONHASHSEED "
-        "rather than tokenization order. On reload, FILENAME_INDEX is "
-        "rebuilt with SELECT ... ORDER BY filename, rowid, so a document's "
-        "word order can come back permuted. search.py compares "
-        "the normalized phrase against a space-joined word list, which is "
-        "order-sensitive, so the +100 exact-filename, +50 substring and "
-        "phrase-in-filename bonuses can be lost across a restart. Present "
-        "identically in the pre-refactor monolith (81faff9, app.py lines "
-        "1239 and 1669). Fix is dict.fromkeys(filename_words) at both "
-        "sites; deliberately not applied inside a behavior-preserving "
-        "refactor. This test XPASSes when that fix lands."
-    ),
-    strict=False,
-)
+CHILD_SCRIPT = """
+import json, os, sys
+
+sys.path.insert(0, sys.argv[1])
+
+from search_engine.config import EngineConfig
+from search_engine.engine import SearchEngine
+
+data, corpus = sys.argv[2], sys.argv[3]
+
+engine = SearchEngine(EngineConfig(data_folder=data))
+
+handles = []
+items = []
+
+for name in sorted(os.listdir(corpus)):
+
+    handle = open(os.path.join(corpus, name), "rb")
+    handles.append(handle)
+    items.append((name, handle))
+
+engine.import_documents(items, log=lambda *args: None)
+
+for handle in handles:
+    handle.close()
+
+# Reopen from disk. This is where a permuted persisted word order surfaces.
+reopened = SearchEngine(EngineConfig(data_folder=data))
+
+reopened.load()
+
+queries = [
+    "alpha beta gamma delta epsilon.txt",
+    "alpha beta gamma",
+    "delta epsilon",
+    "epsilon delta",
+    "gamma",
+]
+
+print(json.dumps(
+    {query: reopened.search(query) for query in queries},
+    sort_keys=True,
+))
+"""
+
+
+def test_ranking_is_stable_across_hash_seeds(tmp_path):
+    """
+    Same corpus, different PYTHONHASHSEED, identical ranking.
+
+    No in-process test can catch this defect class: the seed is fixed for a
+    whole pytest run, so a hash-order-dependent write looks perfectly
+    deterministic from the inside. filename_terms was deduplicated with
+    set(), whose iteration order follows the seed, so a document's filename
+    words could be persisted permuted. Ranking compares phrases and
+    substrings against a space-joined word list, so the +100 exact-filename,
+    +50 substring and phrase-in-filename bonuses were silently lost on the
+    next load.
+
+    Verified against the fix rather than assumed. With both storage paths
+    reverted to set(), seven seeds produced seven distinct payloads and the
+    top score for a phrase that is also a filename fell from 1.0 to 0.7506.
+    With dict.fromkeys, every seed agrees. A five-word filename is used
+    because a permutation of N words goes unnoticed one time in N!.
+    """
+
+    # Repository root, so the child process imports the same package.
+    # Taken from this file rather than from search_engine, whose name is
+    # shadowed in this module by the search_engine fixture.
+    root = os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))
+    )
+
+    corpus = tmp_path / "corpus"
+    data = tmp_path / "data"
+
+    make_txt(
+        str(corpus),
+        "alpha beta gamma delta epsilon.txt",
+        "body text that is irrelevant to ordering\n",
+    )
+
+    payloads = set()
+
+    for seed in ("0", "1", "2", "3"):
+
+        # Same directory each time, index wiped each time. A fresh directory
+        # per seed would make every payload differ on the absolute path
+        # field and hide the signal being tested for.
+        shutil.rmtree(str(data), ignore_errors=True)
+
+        os.makedirs(str(data), exist_ok=True)
+
+        environment = dict(os.environ)
+        environment["PYTHONHASHSEED"] = seed
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                CHILD_SCRIPT,
+                root,
+                str(data),
+                str(corpus),
+            ],
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+
+        assert completed.returncode == 0, completed.stderr
+
+        payloads.add(completed.stdout.strip())
+
+    assert len(payloads) == 1, (
+        f"ranking varied across {len(payloads)} hash seeds"
+    )
+
+
+def test_filename_terms_persist_in_tokenization_order(engine, tmp_path):
+    """
+    Row order in filename_terms must equal tokenization order.
+
+    search.py joins these words with spaces, then compares the normalized
+    query and phrase against that string, so word order carries meaning: a
+    permutation silently drops the +100 exact-filename, +50 substring and
+    phrase-in-filename bonuses. Deduplicating with set() made the persisted
+    order follow PYTHONHASHSEED instead, so the same corpus ranked
+    differently between processes. dict.fromkeys keeps the deduplication
+    and the order.
+
+    A five-word name is deliberate: with N words, a permutation goes
+    unnoticed only one time in N!, so a two-word name could pass by luck.
+    """
+
+    import_paths(engine, [
+        make_txt(
+            str(tmp_path / "ordered"),
+            "alpha beta gamma delta epsilon.txt",
+            "body text irrelevant to ordering\n",
+        ),
+    ])
+
+    filename = "alpha_beta_gamma_delta_epsilon.txt"
+
+    expected = ["alpha", "beta", "gamma", "delta", "epsilon"]
+
+    assert engine.snapshot().filename_index[filename] == expected
+
+    def persisted_order():
+
+        connection = sqlite3.connect(
+            engine.config.sqlite_db_file
+        )
+
+        try:
+
+            return [
+                row[0]
+                for row in connection.execute(
+                    "SELECT term FROM filename_terms "
+                    "WHERE filename = ? ORDER BY rowid",
+                    (filename,),
+                )
+            ]
+
+        finally:
+
+            connection.close()
+
+    # The incremental path (insert_document).
+    assert persisted_order() == expected
+
+    # The rebuild path (sync_from_snapshot) must agree with it.
+    engine.rebuild(log=lambda *args: None)
+
+    assert persisted_order() == expected
+
+    assert engine.snapshot().filename_index[filename] == expected
+
+
 def test_search_after_restart_matches_search_before_it(
     search_engine,
     data_folder,
@@ -2134,8 +2300,12 @@ def test_search_after_restart_matches_search_before_it(
     A reopened engine must rank identically.
 
     This is the offline Android promise: the persisted index is not a
-    degraded copy of the in-memory one. It currently is not guaranteed, for
-    the reason recorded in the xfail marker above.
+    degraded copy of the in-memory one.
+
+    It did not hold while filename words were deduplicated with set(), and
+    this test carried an xfail marker recording the mechanism. Both storage
+    paths now use dict.fromkeys, so it is asserted outright;
+    test_filename_terms_persist_in_tokenization_order pins the cause.
     """
 
     queries = [
