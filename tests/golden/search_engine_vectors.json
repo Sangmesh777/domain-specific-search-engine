@@ -1,0 +1,2913 @@
+{
+  "cases": [
+    {
+      "expected": {
+        "pagination": {
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "total": 0,
+          "total_pages": 0
+        },
+        "results": []
+      },
+      "name": "blank query",
+      "query": "",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "total": 0,
+          "total_pages": 0
+        },
+        "results": []
+      },
+      "name": "whitespace query",
+      "query": "   ",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "filename_score": 0.0,
+            "filetype_filter": "pdf",
+            "highlights": [],
+            "match_type": "File Type: PDF",
+            "open_url": "/api/documents/Network_Notes.pdf",
+            "page": null,
+            "page_url": "/api/documents/Network_Notes.pdf",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "relevance_score": 1.0,
+            "score": 1.0,
+            "snippet": "Filtered by file type: PDF",
+            "tag": "Filtered Result",
+            "title": "Network_Notes.pdf"
+          },
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "filename_score": 0.0,
+            "filetype_filter": "pdf",
+            "highlights": [],
+            "match_type": "File Type: PDF",
+            "open_url": "/api/documents/Network_Security_Guide.pdf",
+            "page": null,
+            "page_url": "/api/documents/Network_Security_Guide.pdf",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "relevance_score": 1.0,
+            "score": 1.0,
+            "snippet": "Filtered by file type: PDF",
+            "tag": "Filtered Result",
+            "title": "Network_Security_Guide.pdf"
+          }
+        ]
+      },
+      "name": "filetype only pdf",
+      "query": "pdf",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 3,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 3,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "filename_score": 0.0,
+            "filetype_filter": "txt",
+            "highlights": [],
+            "match_type": "File Type: TXT",
+            "open_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "page": null,
+            "page_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "path": "{{data_folder}}/alpha_beta_gamma_delta_epsilon.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "relevance_score": 1.0,
+            "score": 1.0,
+            "snippet": "Filtered by file type: TXT",
+            "tag": "Filtered Result",
+            "title": "alpha_beta_gamma_delta_epsilon.txt"
+          },
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/machine_learning.txt",
+            "filename_score": 0.0,
+            "filetype_filter": "txt",
+            "highlights": [],
+            "match_type": "File Type: TXT",
+            "open_url": "/api/documents/machine_learning.txt",
+            "page": null,
+            "page_url": "/api/documents/machine_learning.txt",
+            "path": "{{data_folder}}/machine_learning.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "relevance_score": 1.0,
+            "score": 1.0,
+            "snippet": "Filtered by file type: TXT",
+            "tag": "Filtered Result",
+            "title": "machine_learning.txt"
+          },
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/Syllabus_Overview.txt",
+            "filename_score": 0.0,
+            "filetype_filter": "txt",
+            "highlights": [],
+            "match_type": "File Type: TXT",
+            "open_url": "/api/documents/Syllabus_Overview.txt",
+            "page": null,
+            "page_url": "/api/documents/Syllabus_Overview.txt",
+            "path": "{{data_folder}}/Syllabus_Overview.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "relevance_score": 1.0,
+            "score": 1.0,
+            "snippet": "Filtered by file type: TXT",
+            "tag": "Filtered Result",
+            "title": "Syllabus_Overview.txt"
+          }
+        ]
+      },
+      "name": "filetype only txt",
+      "query": "txt",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/Database_Guide.docx",
+            "filename_score": 0.0,
+            "filetype_filter": "docx",
+            "highlights": [],
+            "match_type": "File Type: DOCX",
+            "open_url": "/api/documents/Database_Guide.docx",
+            "page": null,
+            "page_url": "/api/documents/Database_Guide.docx",
+            "path": "{{data_folder}}/Database_Guide.docx",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "relevance_score": 1.0,
+            "score": 1.0,
+            "snippet": "Filtered by file type: DOCX",
+            "tag": "Filtered Result",
+            "title": "Database_Guide.docx"
+          }
+        ]
+      },
+      "name": "filetype only docx",
+      "query": "docx",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "filename_score": 0.0,
+            "filetype_filter": "pdf",
+            "highlights": [],
+            "match_type": "File Type: PDF",
+            "open_url": "/api/documents/Network_Notes.pdf",
+            "page": null,
+            "page_url": "/api/documents/Network_Notes.pdf",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "relevance_score": 1.0,
+            "score": 1.0,
+            "snippet": "Filtered by file type: PDF",
+            "tag": "Filtered Result",
+            "title": "Network_Notes.pdf"
+          },
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "filename_score": 0.0,
+            "filetype_filter": "pdf",
+            "highlights": [],
+            "match_type": "File Type: PDF",
+            "open_url": "/api/documents/Network_Security_Guide.pdf",
+            "page": null,
+            "page_url": "/api/documents/Network_Security_Guide.pdf",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "relevance_score": 1.0,
+            "score": 1.0,
+            "snippet": "Filtered by file type: PDF",
+            "tag": "Filtered Result",
+            "title": "Network_Security_Guide.pdf"
+          }
+        ]
+      },
+      "name": "filetype only with leading dot",
+      "query": ".pdf",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": [],
+      "name": "quoted phrase matching nothing",
+      "query": "\"zzzqqq wwwww\"",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 0,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 0,
+          "total": 0,
+          "total_pages": 0
+        },
+        "results": []
+      },
+      "name": "filetype plus keyword that matches nothing",
+      "query": "zzzqqq pdf",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0769,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 160.0,
+            "filetype_filter": "pdf",
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Phrase",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 100.0,
+            "prefix_similarity": 0.0,
+            "score": 1.0,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.0455,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": "pdf",
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.2761,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "exact filename",
+      "query": "Network Security Guide.pdf",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.1421,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 90.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Phrase",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 100.0,
+            "prefix_similarity": 0.0,
+            "score": 0.9625,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.084,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.3699,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "filename substring two words",
+      "query": "Network Security",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.1421,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 40.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.7125,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.084,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.3699,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "filename substring reversed",
+      "query": "Security Network",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "exact_content_match": false,
+            "filename_score": 200.0,
+            "filetype_filter": "txt",
+            "highlights": [],
+            "lexical_match_relevance": 0.0,
+            "match_type": "Filename + Phrase",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "page": null,
+            "page_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "path": "{{data_folder}}/alpha_beta_gamma_delta_epsilon.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 100.0,
+            "prefix_similarity": 0.0,
+            "score": 0.85,
+            "snippet": "Filename matched: alpha, beta, gamma, delta, epsilon",
+            "tag": "Ranked Result",
+            "title": "alpha_beta_gamma_delta_epsilon.txt"
+          }
+        ]
+      },
+      "name": "five word filename exact",
+      "query": "alpha beta gamma delta epsilon.txt",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 3,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 3,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "exact_content_match": false,
+            "filename_score": 110.0,
+            "filetype_filter": null,
+            "highlights": [],
+            "lexical_match_relevance": 0.0,
+            "match_type": "Filename + Phrase",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "page": null,
+            "page_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "path": "{{data_folder}}/alpha_beta_gamma_delta_epsilon.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 100.0,
+            "prefix_similarity": 0.0,
+            "score": 0.8125,
+            "snippet": "Filename matched: alpha, beta, gamma",
+            "tag": "Ranked Result",
+            "title": "alpha_beta_gamma_delta_epsilon.txt"
+          },
+          {
+            "content_score": 0.2842,
+            "document_url": "/api/documents/Database_Guide.docx",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 53,
+                "start": 48
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Database_Guide.docx#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Database_Guide.docx#page=1",
+            "path": "{{data_folder}}/Database_Guide.docx",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.15,
+            "snippet": "normalization removes redundancy from relations alpha appears here and beta appears much later",
+            "tag": "Ranked Result",
+            "title": "Database_Guide.docx"
+          },
+          {
+            "content_score": 0.2842,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 10,
+                "start": 0
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=2",
+            "page": 2,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=2",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.15,
+            "snippet": "alpha beta appear adjacent in this document",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          }
+        ]
+      },
+      "name": "five word filename partial",
+      "query": "alpha beta gamma",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "exact_content_match": false,
+            "filename_score": 90.0,
+            "filetype_filter": null,
+            "highlights": [],
+            "lexical_match_relevance": 0.0,
+            "match_type": "Filename + Phrase",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "page": null,
+            "page_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "path": "{{data_folder}}/alpha_beta_gamma_delta_epsilon.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 100.0,
+            "prefix_similarity": 0.0,
+            "score": 0.8125,
+            "snippet": "Filename matched: delta, epsilon",
+            "tag": "Ranked Result",
+            "title": "alpha_beta_gamma_delta_epsilon.txt"
+          }
+        ]
+      },
+      "name": "five word filename tail",
+      "query": "delta epsilon",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 3,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 3,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "exact_content_match": false,
+            "filename_score": 40.0,
+            "filetype_filter": null,
+            "highlights": [],
+            "lexical_match_relevance": 0.0,
+            "match_type": "Filename Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "page": null,
+            "page_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "path": "{{data_folder}}/alpha_beta_gamma_delta_epsilon.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.5625,
+            "snippet": "Filename matched: alpha, epsilon",
+            "tag": "Ranked Result",
+            "title": "alpha_beta_gamma_delta_epsilon.txt"
+          },
+          {
+            "content_score": 0.1421,
+            "document_url": "/api/documents/Database_Guide.docx",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 53,
+                "start": 48
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Database_Guide.docx#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Database_Guide.docx#page=1",
+            "path": "{{data_folder}}/Database_Guide.docx",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.15,
+            "snippet": "normalization removes redundancy from relations alpha appears here and beta appears much later",
+            "tag": "Ranked Result",
+            "title": "Database_Guide.docx"
+          },
+          {
+            "content_score": 0.1421,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 5,
+                "start": 0
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=2",
+            "page": 2,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=2",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.15,
+            "snippet": "alpha beta appear adjacent in this document",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          }
+        ]
+      },
+      "name": "five word filename non contiguous",
+      "query": "alpha epsilon",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "exact_content_match": false,
+            "filename_score": 90.0,
+            "filetype_filter": null,
+            "highlights": [],
+            "lexical_match_relevance": 0.0,
+            "match_type": "Filename + Phrase",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "page": null,
+            "page_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "path": "{{data_folder}}/alpha_beta_gamma_delta_epsilon.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 130.0,
+            "prefix_similarity": 0.0,
+            "score": 0.91,
+            "snippet": "Filename matched: alpha, beta",
+            "tag": "Ranked Result",
+            "title": "alpha_beta_gamma_delta_epsilon.txt"
+          },
+          {
+            "content_score": 0.2842,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 10,
+                "start": 0
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Phrase Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=2",
+            "page": 2,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=2",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 1,
+            "phrase_score": 50.0,
+            "prefix_similarity": 0.0,
+            "score": 0.125,
+            "snippet": "alpha beta appear adjacent in this document",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          }
+        ]
+      },
+      "name": "quoted phrase adjacent",
+      "query": "\"alpha beta\"",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 3,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 3,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0,
+            "document_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "exact_content_match": false,
+            "filename_score": 90.0,
+            "filetype_filter": null,
+            "highlights": [],
+            "lexical_match_relevance": 0.0,
+            "match_type": "Filename + Phrase",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "page": null,
+            "page_url": "/api/documents/alpha_beta_gamma_delta_epsilon.txt",
+            "path": "{{data_folder}}/alpha_beta_gamma_delta_epsilon.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 100.0,
+            "prefix_similarity": 0.0,
+            "score": 0.8125,
+            "snippet": "Filename matched: alpha, beta",
+            "tag": "Ranked Result",
+            "title": "alpha_beta_gamma_delta_epsilon.txt"
+          },
+          {
+            "content_score": 0.2842,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 10,
+                "start": 0
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Phrase Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=2",
+            "page": 2,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=2",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 1,
+            "phrase_score": 50.0,
+            "prefix_similarity": 0.0,
+            "score": 0.2,
+            "snippet": "alpha beta appear adjacent in this document",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.2842,
+            "document_url": "/api/documents/Database_Guide.docx",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 53,
+                "start": 48
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Database_Guide.docx#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Database_Guide.docx#page=1",
+            "path": "{{data_folder}}/Database_Guide.docx",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.15,
+            "snippet": "normalization removes redundancy from relations alpha appears here and beta appears much later",
+            "tag": "Ranked Result",
+            "title": "Database_Guide.docx"
+          }
+        ]
+      },
+      "name": "unquoted same words",
+      "query": "alpha beta",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 1.3141,
+            "document_url": "/api/documents/machine_learning.txt",
+            "exact_content_match": true,
+            "filename_score": 140.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 16,
+                "start": 0
+              },
+              {
+                "end": 44,
+                "start": 28
+              },
+              {
+                "end": 70,
+                "start": 54
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Phrase",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/machine_learning.txt#page=1",
+            "page": 1,
+            "page_url": "/api/documents/machine_learning.txt#page=1",
+            "path": "{{data_folder}}/machine_learning.txt",
+            "phrase_occurrences": 3,
+            "phrase_score": 167.0652,
+            "prefix_similarity": 0.0,
+            "score": 1.0,
+            "snippet": "machine learning models and machine learning datasets machine learning studies learning systems",
+            "tag": "Ranked Result",
+            "title": "machine_learning.txt"
+          }
+        ]
+      },
+      "name": "quoted phrase repeated",
+      "query": "\"machine learning\"",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0769,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 160.0,
+            "filetype_filter": "pdf",
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Phrase",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 130.0,
+            "prefix_similarity": 0.0,
+            "score": 1.0,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          }
+        ]
+      },
+      "name": "quoted filename",
+      "query": "\"Network Security Guide.pdf\"",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.1421,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.7125,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.084,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.6511,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "uppercase query",
+      "query": "NETWORK",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0769,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 160.0,
+            "filetype_filter": "pdf",
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Phrase",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 100.0,
+            "prefix_similarity": 0.0,
+            "score": 1.0,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.0455,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": "pdf",
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.2761,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "mixed case filename query",
+      "query": "network security GUIDE.pdf",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.1421,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 90.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Phrase",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 100.0,
+            "prefix_similarity": 0.0,
+            "score": 0.9625,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.084,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.3699,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "hyphenated query",
+      "query": "network-security",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.1421,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 90.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Phrase",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 100.0,
+            "prefix_similarity": 0.0,
+            "score": 0.9625,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.084,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.3699,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "collapsed internal spaces",
+      "query": "network    security",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.1421,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.7125,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.084,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.6511,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "trailing punctuation",
+      "query": "network.",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.2048,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 52,
+                "start": 39
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Phrase Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=2",
+            "page": 2,
+            "page_url": "/api/documents/Network_Notes.pdf#page=2",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 1,
+            "phrase_score": 50.0,
+            "prefix_similarity": 0.0,
+            "score": 0.85,
+            "snippet": "routing protocols such as bgp and ospf reference 999",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "numeric word with a text word",
+      "query": "reference 999",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.1733,
+            "document_url": "/api/documents/Database_Guide.docx",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 13,
+                "start": 0
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Database_Guide.docx#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Database_Guide.docx#page=1",
+            "path": "{{data_folder}}/Database_Guide.docx",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.75,
+            "snippet": "normalization removes redundancy from relations alpha appears here and beta appears much later",
+            "tag": "Ranked Result",
+            "title": "Database_Guide.docx"
+          }
+        ]
+      },
+      "name": "content only term",
+      "query": "normalization",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.6158,
+            "document_url": "/api/documents/Syllabus_Overview.txt",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 3,
+                "start": 0
+              },
+              {
+                "end": 23,
+                "start": 20
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Syllabus_Overview.txt#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Syllabus_Overview.txt#page=1",
+            "path": "{{data_folder}}/Syllabus_Overview.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.75,
+            "snippet": "the syllabus covers the semester plan",
+            "tag": "Ranked Result",
+            "title": "Syllabus_Overview.txt"
+          },
+          {
+            "content_score": 0.1679,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 37,
+                "start": 34
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.3136,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "common term",
+      "query": "the",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.1015,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": false,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 38,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 0.9143,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.7143,
+            "score": 0.7371,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.06,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": false,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 14,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 0.9143,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.7143,
+            "score": 0.4917,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "prefix three characters",
+      "query": "netwo",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.12,
+            "document_url": "/api/documents/Database_Guide.docx",
+            "exact_content_match": false,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 9,
+                "start": 0
+              }
+            ],
+            "lexical_match_relevance": 0.9077,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Database_Guide.docx#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Database_Guide.docx#page=1",
+            "path": "{{data_folder}}/Database_Guide.docx",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.6923,
+            "score": 0.7362,
+            "snippet": "normalization removes redundancy from relations alpha appears here and beta appears much later",
+            "tag": "Ranked Result",
+            "title": "Database_Guide.docx"
+          }
+        ]
+      },
+      "name": "prefix longer",
+      "query": "normaliza",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.1024,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 52,
+                "start": 49
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=2",
+            "page": 2,
+            "page_url": "/api/documents/Network_Notes.pdf#page=2",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.75,
+            "snippet": "routing protocols such as bgp and ospf reference 999",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "exact numeric term",
+      "query": "999",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0205,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": false,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 19,
+                "start": 16
+              }
+            ],
+            "lexical_match_relevance": 0.38,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.2,
+            "open_url": "/api/documents/Network_Notes.pdf#page=3",
+            "page": 3,
+            "page_url": "/api/documents/Network_Notes.pdf#page=3",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.657,
+            "snippet": "the token unique777marker hides a numeric run",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "numeric substring",
+      "query": "777",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 0,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 0,
+          "total": 0,
+          "total_pages": 0
+        },
+        "results": []
+      },
+      "name": "single digit",
+      "query": "2",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0769,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": "pdf",
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.7125,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.0455,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": "pdf",
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.6511,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "filetype plus keyword",
+      "query": "network pdf",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 0,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 0,
+          "total": 0,
+          "total_pages": 0
+        },
+        "results": []
+      },
+      "name": "filetype excludes matches",
+      "query": "normalization txt",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 0,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 0,
+          "total": 0,
+          "total_pages": 0
+        },
+        "results": []
+      },
+      "name": "nothing matches",
+      "query": "zzzqqq",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": true,
+          "has_previous": false,
+          "limit": 1,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 2
+        },
+        "results": [
+          {
+            "content_score": 0.6158,
+            "document_url": "/api/documents/Syllabus_Overview.txt",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 3,
+                "start": 0
+              },
+              {
+                "end": 23,
+                "start": 20
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Syllabus_Overview.txt#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Syllabus_Overview.txt#page=1",
+            "path": "{{data_folder}}/Syllabus_Overview.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.75,
+            "snippet": "the syllabus covers the semester plan",
+            "tag": "Ranked Result",
+            "title": "Syllabus_Overview.txt"
+          }
+        ]
+      },
+      "name": "page one limit one",
+      "query": "the",
+      "requested_limit": 1,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": true,
+          "limit": 1,
+          "page": 2,
+          "start": 2,
+          "total": 2,
+          "total_pages": 2
+        },
+        "results": [
+          {
+            "content_score": 0.1679,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 37,
+                "start": 34
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.3136,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "page two limit one",
+      "query": "the",
+      "requested_limit": 1,
+      "requested_page": 2
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": true,
+          "limit": 1,
+          "page": 2,
+          "start": 2,
+          "total": 2,
+          "total_pages": 2
+        },
+        "results": [
+          {
+            "content_score": 0.1679,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 37,
+                "start": 34
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.3136,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "page three limit one",
+      "query": "the",
+      "requested_limit": 1,
+      "requested_page": 3
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": true,
+          "has_previous": false,
+          "limit": 1,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 2
+        },
+        "results": [
+          {
+            "content_score": 0.6158,
+            "document_url": "/api/documents/Syllabus_Overview.txt",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 3,
+                "start": 0
+              },
+              {
+                "end": 23,
+                "start": 20
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Syllabus_Overview.txt#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Syllabus_Overview.txt#page=1",
+            "path": "{{data_folder}}/Syllabus_Overview.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.75,
+            "snippet": "the syllabus covers the semester plan",
+            "tag": "Ranked Result",
+            "title": "Syllabus_Overview.txt"
+          }
+        ]
+      },
+      "name": "limit zero clamps to one",
+      "query": "the",
+      "requested_limit": 0,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": true,
+          "has_previous": false,
+          "limit": 1,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 2
+        },
+        "results": [
+          {
+            "content_score": 0.6158,
+            "document_url": "/api/documents/Syllabus_Overview.txt",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 3,
+                "start": 0
+              },
+              {
+                "end": 23,
+                "start": 20
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Syllabus_Overview.txt#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Syllabus_Overview.txt#page=1",
+            "path": "{{data_folder}}/Syllabus_Overview.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.75,
+            "snippet": "the syllabus covers the semester plan",
+            "tag": "Ranked Result",
+            "title": "Syllabus_Overview.txt"
+          }
+        ]
+      },
+      "name": "negative limit clamps to one",
+      "query": "the",
+      "requested_limit": -5,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 50,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.6158,
+            "document_url": "/api/documents/Syllabus_Overview.txt",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 3,
+                "start": 0
+              },
+              {
+                "end": 23,
+                "start": 20
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Syllabus_Overview.txt#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Syllabus_Overview.txt#page=1",
+            "path": "{{data_folder}}/Syllabus_Overview.txt",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.75,
+            "snippet": "the syllabus covers the semester plan",
+            "tag": "Ranked Result",
+            "title": "Syllabus_Overview.txt"
+          },
+          {
+            "content_score": 0.1679,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 37,
+                "start": 34
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.3136,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "limit above maximum clamps",
+      "query": "the",
+      "requested_limit": 9999,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.1421,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.7125,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.084,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.6511,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "page zero clamps to one",
+      "query": "network",
+      "requested_limit": 10,
+      "requested_page": 0
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.1421,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.7125,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.084,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.6511,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "negative page clamps to one",
+      "query": "network",
+      "requested_limit": 10,
+      "requested_page": -5
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": true,
+          "limit": 1,
+          "page": 2,
+          "start": 2,
+          "total": 2,
+          "total_pages": 2
+        },
+        "results": [
+          {
+            "content_score": 0.084,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.6511,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "page beyond the end clamps",
+      "query": "network",
+      "requested_limit": 1,
+      "requested_page": 999
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 2,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 2,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.1421,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 40,
+                "start": 33
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.7125,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          },
+          {
+            "content_score": 0.084,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": true,
+            "filename_score": 20.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 16,
+                "start": 9
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Filename + Content",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.0,
+            "score": 0.6511,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "default paging",
+      "query": "network",
+      "requested_limit": 10,
+      "requested_page": 1
+    }
+  ],
+  "corpus": [
+    {
+      "filename": "Network Notes.pdf",
+      "pages": [
+        "Computer network fundamentals and the OSI model",
+        "Routing protocols such as BGP and OSPF reference 999",
+        "The token unique777marker hides a numeric run"
+      ],
+      "purpose": "an exact numeric term (999) and a numeric run buried inside a longer token (unique777marker), which exercise the exact and numeric-substring branches of the lexical hierarchy",
+      "stored_as": "Network_Notes.pdf"
+    },
+    {
+      "filename": "Network Security Guide.pdf",
+      "pages": [
+        "Firewalls filter traffic between network zones",
+        "alpha beta appear adjacent in this document"
+      ],
+      "purpose": "a multi-word filename that matches a substring query, plus an adjacent 'alpha beta' pair for phrase matching",
+      "stored_as": "Network_Security_Guide.pdf"
+    },
+    {
+      "filename": "Database Guide.docx",
+      "pages": [
+        "Normalization removes redundancy from relations",
+        "alpha appears here and beta appears much later"
+      ],
+      "purpose": "contains 'alpha' and 'beta' but NOT adjacent, so a quoted phrase query must exclude it while an unquoted one keeps it",
+      "stored_as": "Database_Guide.docx"
+    },
+    {
+      "filename": "machine learning.txt",
+      "pages": [
+        "machine learning models and machine learning datasets\nmachine learning studies learning systems\n"
+      ],
+      "purpose": "a phrase repeated several times that is also the document's own filename, so phrase scoring and the filename phrase bonus combine",
+      "stored_as": "machine_learning.txt"
+    },
+    {
+      "filename": "alpha beta gamma delta epsilon.txt",
+      "pages": [
+        "ordering body text that is otherwise unremarkable\n"
+      ],
+      "purpose": "a five-word filename, so filename word order carries real weight and a permuted order would be visible",
+      "stored_as": "alpha_beta_gamma_delta_epsilon.txt"
+    },
+    {
+      "filename": "Syllabus Overview.txt",
+      "pages": [
+        "the syllabus covers the semester plan\n"
+      ],
+      "purpose": "a document that shares the common word 'the' with several others, producing equal scores to exercise tie ordering",
+      "stored_as": "Syllabus_Overview.txt"
+    }
+  ],
+  "description": "Indexing and ranking contract for the VTU search engine core. Generated by tools/export_golden_vectors.py from the engine itself. Build an index from corpus.pages using the recorded tokenizer rules, then every case must reproduce its expected payload exactly.",
+  "index": {
+    "documents": {
+      "Database_Guide.docx": {
+        "page_count": 1,
+        "path": "{{data_folder}}/Database_Guide.docx",
+        "title": "Database_Guide.docx",
+        "total_words": 13
+      },
+      "Network_Notes.pdf": {
+        "page_count": 3,
+        "path": "{{data_folder}}/Network_Notes.pdf",
+        "title": "Network_Notes.pdf",
+        "total_words": 22
+      },
+      "Network_Security_Guide.pdf": {
+        "page_count": 2,
+        "path": "{{data_folder}}/Network_Security_Guide.pdf",
+        "title": "Network_Security_Guide.pdf",
+        "total_words": 13
+      },
+      "Syllabus_Overview.txt": {
+        "page_count": 1,
+        "path": "{{data_folder}}/Syllabus_Overview.txt",
+        "title": "Syllabus_Overview.txt",
+        "total_words": 6
+      },
+      "alpha_beta_gamma_delta_epsilon.txt": {
+        "page_count": 1,
+        "path": "{{data_folder}}/alpha_beta_gamma_delta_epsilon.txt",
+        "title": "alpha_beta_gamma_delta_epsilon.txt",
+        "total_words": 7
+      },
+      "machine_learning.txt": {
+        "page_count": 1,
+        "path": "{{data_folder}}/machine_learning.txt",
+        "title": "machine_learning.txt",
+        "total_words": 12
+      }
+    },
+    "filename_words": {
+      "Database_Guide.docx": [
+        "database",
+        "guide"
+      ],
+      "Network_Notes.pdf": [
+        "network",
+        "notes"
+      ],
+      "Network_Security_Guide.pdf": [
+        "network",
+        "security",
+        "guide"
+      ],
+      "Syllabus_Overview.txt": [
+        "syllabus",
+        "overview"
+      ],
+      "alpha_beta_gamma_delta_epsilon.txt": [
+        "alpha",
+        "beta",
+        "gamma",
+        "delta",
+        "epsilon"
+      ],
+      "machine_learning.txt": [
+        "machine",
+        "learning"
+      ]
+    },
+    "page_text": {
+      "Database_Guide.docx": [
+        {
+          "page": 1,
+          "text": "normalization removes redundancy from relations\nalpha appears here and beta appears much later"
+        }
+      ],
+      "Network_Notes.pdf": [
+        {
+          "page": 1,
+          "text": "computer network fundamentals and the osi model"
+        },
+        {
+          "page": 2,
+          "text": "routing protocols such as bgp and ospf reference 999"
+        },
+        {
+          "page": 3,
+          "text": "the token unique777marker hides a numeric run"
+        }
+      ],
+      "Network_Security_Guide.pdf": [
+        {
+          "page": 1,
+          "text": "firewalls filter traffic between network zones"
+        },
+        {
+          "page": 2,
+          "text": "alpha beta appear adjacent in this document"
+        }
+      ],
+      "Syllabus_Overview.txt": [
+        {
+          "page": 1,
+          "text": "the syllabus covers the semester plan\n"
+        }
+      ],
+      "alpha_beta_gamma_delta_epsilon.txt": [
+        {
+          "page": 1,
+          "text": "ordering body text that is otherwise unremarkable\n"
+        }
+      ],
+      "machine_learning.txt": [
+        {
+          "page": 1,
+          "text": "machine learning models and machine learning datasets\nmachine learning studies learning systems\n"
+        }
+      ]
+    },
+    "term_postings": {
+      "999": {
+        "Network_Notes.pdf": 1
+      },
+      "adjacent": {
+        "Network_Security_Guide.pdf": 1
+      },
+      "alpha": {
+        "Database_Guide.docx": 1,
+        "Network_Security_Guide.pdf": 1
+      },
+      "and": {
+        "Database_Guide.docx": 1,
+        "Network_Notes.pdf": 2,
+        "machine_learning.txt": 1
+      },
+      "appear": {
+        "Network_Security_Guide.pdf": 1
+      },
+      "appears": {
+        "Database_Guide.docx": 2
+      },
+      "as": {
+        "Network_Notes.pdf": 1
+      },
+      "beta": {
+        "Database_Guide.docx": 1,
+        "Network_Security_Guide.pdf": 1
+      },
+      "between": {
+        "Network_Security_Guide.pdf": 1
+      },
+      "bgp": {
+        "Network_Notes.pdf": 1
+      },
+      "body": {
+        "alpha_beta_gamma_delta_epsilon.txt": 1
+      },
+      "computer": {
+        "Network_Notes.pdf": 1
+      },
+      "covers": {
+        "Syllabus_Overview.txt": 1
+      },
+      "datasets": {
+        "machine_learning.txt": 1
+      },
+      "document": {
+        "Network_Security_Guide.pdf": 1
+      },
+      "filter": {
+        "Network_Security_Guide.pdf": 1
+      },
+      "firewalls": {
+        "Network_Security_Guide.pdf": 1
+      },
+      "from": {
+        "Database_Guide.docx": 1
+      },
+      "fundamentals": {
+        "Network_Notes.pdf": 1
+      },
+      "here": {
+        "Database_Guide.docx": 1
+      },
+      "hides": {
+        "Network_Notes.pdf": 1
+      },
+      "in": {
+        "Network_Security_Guide.pdf": 1
+      },
+      "is": {
+        "alpha_beta_gamma_delta_epsilon.txt": 1
+      },
+      "later": {
+        "Database_Guide.docx": 1
+      },
+      "learning": {
+        "machine_learning.txt": 4
+      },
+      "machine": {
+        "machine_learning.txt": 3
+      },
+      "model": {
+        "Network_Notes.pdf": 1
+      },
+      "models": {
+        "machine_learning.txt": 1
+      },
+      "much": {
+        "Database_Guide.docx": 1
+      },
+      "network": {
+        "Network_Notes.pdf": 1,
+        "Network_Security_Guide.pdf": 1
+      },
+      "normalization": {
+        "Database_Guide.docx": 1
+      },
+      "numeric": {
+        "Network_Notes.pdf": 1
+      },
+      "ordering": {
+        "alpha_beta_gamma_delta_epsilon.txt": 1
+      },
+      "osi": {
+        "Network_Notes.pdf": 1
+      },
+      "ospf": {
+        "Network_Notes.pdf": 1
+      },
+      "otherwise": {
+        "alpha_beta_gamma_delta_epsilon.txt": 1
+      },
+      "plan": {
+        "Syllabus_Overview.txt": 1
+      },
+      "protocols": {
+        "Network_Notes.pdf": 1
+      },
+      "redundancy": {
+        "Database_Guide.docx": 1
+      },
+      "reference": {
+        "Network_Notes.pdf": 1
+      },
+      "relations": {
+        "Database_Guide.docx": 1
+      },
+      "removes": {
+        "Database_Guide.docx": 1
+      },
+      "routing": {
+        "Network_Notes.pdf": 1
+      },
+      "run": {
+        "Network_Notes.pdf": 1
+      },
+      "semester": {
+        "Syllabus_Overview.txt": 1
+      },
+      "studies": {
+        "machine_learning.txt": 1
+      },
+      "such": {
+        "Network_Notes.pdf": 1
+      },
+      "syllabus": {
+        "Syllabus_Overview.txt": 1
+      },
+      "systems": {
+        "machine_learning.txt": 1
+      },
+      "text": {
+        "alpha_beta_gamma_delta_epsilon.txt": 1
+      },
+      "that": {
+        "alpha_beta_gamma_delta_epsilon.txt": 1
+      },
+      "the": {
+        "Network_Notes.pdf": 2,
+        "Syllabus_Overview.txt": 2
+      },
+      "this": {
+        "Network_Security_Guide.pdf": 1
+      },
+      "token": {
+        "Network_Notes.pdf": 1
+      },
+      "traffic": {
+        "Network_Security_Guide.pdf": 1
+      },
+      "unique777marker": {
+        "Network_Notes.pdf": 1
+      },
+      "unremarkable": {
+        "alpha_beta_gamma_delta_epsilon.txt": 1
+      },
+      "zones": {
+        "Network_Security_Guide.pdf": 1
+      }
+    }
+  },
+  "normative_source": "search_engine/search.py is the specification. Its module docstring states the matching signals, the lexical hierarchy and the weight sets. These vectors verify a reimplementation against that behavior; they do not restate it, so the two cannot disagree.",
+  "not_covered": "Text extraction from PDF and DOCX. The corpus below is recorded as extracted page text, because Android will not use PyPDF2 or python-docx. Extraction equivalence must be verified separately against real documents on a device.",
+  "portability": {
+    "data_folder_placeholder": "{{data_folder}}",
+    "floats": "Written exactly as Python renders them. Scores are round(x, 4), which is half-to-even on the binary value; BigDecimal HALF_EVEN on a decimal literal differs on some inputs.",
+    "paths": "Every absolute path is written with the placeholder above. Substitute the local data folder before comparing."
+  },
+  "schema_version": 1,
+  "tokenizer": {
+    "content": "Lowercase the text, replace every character that is neither alphanumeric nor whitespace with a space, split on whitespace, and drop tokens shorter than 2 characters.",
+    "filename_and_query": "The same, but keep single-character tokens so that numeric words such as 1, 2 and 999 stay searchable.",
+    "warning": "'alphanumeric' and 'whitespace' are the Unicode-aware Python predicates str.isalnum and str.isspace, not an ASCII-only test. A reimplementation must match that, or non-ASCII corpora will index differently."
+  }
+}
