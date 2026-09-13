@@ -11,6 +11,7 @@ The tests create a small temporary corpus through the real HTTP API,
 exercise the public behavior, and clean up their own documents.
 """
 
+import os
 from pathlib import Path
 import tempfile
 
@@ -18,7 +19,13 @@ import pytest
 import requests
 
 
-BASE_URL = "http://127.0.0.1:5000"
+# Overridable so the same suite can be pointed at a reference build, which
+# is how tools/verify_http_parity.py proves a refactor preserved mutation
+# behavior and not just read behavior.
+BASE_URL = os.environ.get(
+    "VTU_API_BASE_URL",
+    "http://127.0.0.1:5000",
+)
 PREFIX = "pytest_phase12_"
 TEST_COUNT = 5
 

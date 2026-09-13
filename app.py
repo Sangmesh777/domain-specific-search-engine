@@ -23,19 +23,16 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
 import os
-import json
-import sqlite3
 import math
 from urllib.parse import quote
 import threading
 import time
 
 from search_engine.config import (
-    SUPPORTED_EXTENSIONS,
+    EngineConfig,
 )
-from search_engine.extraction import (
-    extract_pages,
-    extract_text,
+from search_engine.engine import (
+    SearchEngine,
 )
 from search_engine.filenames import (
     sanitize_upload_filename,
@@ -53,7 +50,6 @@ from search_engine.snippets import (
     get_snippet_and_page,
 )
 from search_engine.tokenizer import (
-    tokenize,
     tokenize_filename,
 )
 
@@ -92,60 +88,39 @@ if not os.path.exists(DATA_FOLDER):
 
 
 # ============================================================
-# DATABASE VARIABLES
+# ENGINE
 # ============================================================
 
-REAL_INVERTED_INDEX = {}
-DOCUMENT_METADATA = {}
-FILENAME_INDEX = {}
-PAGE_TEXT_INDEX = {}
+# One authoritative engine instance.
+#
+# Everything below this point is HTTP adaptation and runtime
+# orchestration. Indexing, ranking, snippets, SQLite persistence,
+# extraction and the rebuild implementation all live in the
+# transport-independent search_engine package, which the offline Android
+# backend uses unchanged.
+ENGINE = SearchEngine(
+    EngineConfig(
+        data_folder=DATA_FOLDER,
+        sqlite_db_file=SQLITE_DB_FILE,
+        index_file=INDEX_FILE,
+        meta_file=META_FILE,
+        filename_index_file=FILENAME_INDEX_FILE,
+        page_text_file=PAGE_TEXT_FILE,
+    )
+)
+
 
 # ============================================================
-# INDEXING STATE
+# BACKGROUND REBUILD RUNTIME
 # ============================================================
+
+# Scheduling is a runtime concern, so it stays in the adapter: the engine
+# performs a rebuild, this layer decides when one runs, coalesces
+# overlapping requests and owns the thread.
 
 INDEX_STATUS_LOCK = threading.Lock()
-INDEX_DATA_LOCK = threading.Lock()
-
-INDEX_STATUS = {
-    "state": "READY",
-    "message": "Search index is ready.",
-    "started_at": None,
-    "completed_at": None,
-    "last_error": None,
-    "generation": 0,
-}
 
 INDEX_THREAD = None
-
-
-def set_index_status(
-    state,
-    message,
-    started_at=None,
-    completed_at=None,
-    last_error=None,
-):
-    with INDEX_STATUS_LOCK:
-        INDEX_STATUS["state"] = state
-        INDEX_STATUS["message"] = message
-
-        if started_at is not None:
-            INDEX_STATUS["started_at"] = started_at
-
-        if completed_at is not None:
-            INDEX_STATUS["completed_at"] = completed_at
-
-        INDEX_STATUS["last_error"] = last_error
-
-        if state == "READY":
-            INDEX_STATUS["generation"] += 1
-
-
-def get_index_status():
-    with INDEX_STATUS_LOCK:
-        return dict(INDEX_STATUS)
-
 
 # If a document changes while a rebuild is already running, remember
 # that another rebuild is required immediately after the current one.
@@ -153,6 +128,7 @@ INDEX_REBUILD_REQUESTED = False
 
 
 def rebuild_database_background():
+
     global INDEX_THREAD
     global INDEX_REBUILD_REQUESTED
 
@@ -161,7 +137,7 @@ def rebuild_database_background():
     with INDEX_STATUS_LOCK:
         INDEX_REBUILD_REQUESTED = False
 
-    set_index_status(
+    ENGINE.set_index_status(
         "INDEXING",
         "Rebuilding search index in background...",
         started_at=started_at,
@@ -170,11 +146,11 @@ def rebuild_database_background():
     )
 
     try:
-        rebuild_database()
+        ENGINE.rebuild()
 
         completed_at = time.time()
 
-        set_index_status(
+        ENGINE.set_index_status(
             "READY",
             "Search index is ready.",
             completed_at=completed_at,
@@ -190,7 +166,7 @@ def rebuild_database_background():
 
         completed_at = time.time()
 
-        set_index_status(
+        ENGINE.set_index_status(
             "ERROR",
             "Search index rebuild failed.",
             completed_at=completed_at,
@@ -219,6 +195,7 @@ def rebuild_database_background():
 
 
 def start_background_rebuild():
+
     global INDEX_THREAD
     global INDEX_REBUILD_REQUESTED
 
@@ -246,1023 +223,10 @@ def start_background_rebuild():
 
 
 # ============================================================
-# DATABASE LOAD
+# STARTUP REPORT
 # ============================================================
 
-
-# ============================================================
-# SQLITE INCREMENTAL INDEX
-# ============================================================
-
-SQLITE_SCHEMA = """
-PRAGMA journal_mode=WAL;
-
-CREATE TABLE IF NOT EXISTS documents (
-    filename TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    path TEXT NOT NULL,
-    total_words INTEGER NOT NULL,
-    page_count INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS term_postings (
-    term TEXT NOT NULL,
-    filename TEXT NOT NULL,
-    term_count INTEGER NOT NULL,
-    PRIMARY KEY (term, filename)
-);
-
-CREATE INDEX IF NOT EXISTS idx_term_postings_term
-ON term_postings(term);
-
-CREATE INDEX IF NOT EXISTS idx_term_postings_filename
-ON term_postings(filename);
-
-CREATE TABLE IF NOT EXISTS filename_terms (
-    filename TEXT NOT NULL,
-    term TEXT NOT NULL,
-    PRIMARY KEY (filename, term)
-);
-
-CREATE INDEX IF NOT EXISTS idx_filename_terms_term
-ON filename_terms(term);
-
-CREATE TABLE IF NOT EXISTS pages (
-    filename TEXT NOT NULL,
-    page_number INTEGER NOT NULL,
-    text TEXT NOT NULL,
-    PRIMARY KEY (filename, page_number)
-);
-"""
-
-
-def get_sqlite_connection():
-    connection = sqlite3.connect(
-        SQLITE_DB_FILE,
-        timeout=30,
-    )
-
-    connection.execute(
-        "PRAGMA foreign_keys = ON"
-    )
-
-    return connection
-
-
-def initialize_sqlite_store():
-    """
-    Create the SQLite index.
-
-    If search.db is empty but the legacy JSON index contains data,
-    migrate the existing index once. Future document changes use
-    incremental SQLite updates instead of full JSON rebuilds.
-    """
-
-    os.makedirs(DATA_FOLDER, exist_ok=True)
-
-    with get_sqlite_connection() as connection:
-
-        connection.executescript(
-            SQLITE_SCHEMA
-        )
-
-        count = connection.execute(
-            "SELECT COUNT(*) FROM documents"
-        ).fetchone()[0]
-
-        if (
-            count == 0
-            and DOCUMENT_METADATA
-        ):
-            sync_sqlite_from_memory(
-                connection
-            )
-
-    # SQLite becomes the persistent source of truth for the
-    # incremental document index.
-    load_database_from_sqlite()
-
-
-def sync_sqlite_from_memory(connection=None):
-    """
-    Full synchronization used only for initial migration or an explicit
-    manual full rebuild. Normal uploads/deletes do NOT call this.
-    """
-
-    close_connection = False
-
-    if connection is None:
-        connection = get_sqlite_connection()
-        close_connection = True
-
-    try:
-        connection.execute(
-            "DELETE FROM term_postings"
-        )
-
-        connection.execute(
-            "DELETE FROM filename_terms"
-        )
-
-        connection.execute(
-            "DELETE FROM pages"
-        )
-
-        connection.execute(
-            "DELETE FROM documents"
-        )
-
-        for filename, metadata in DOCUMENT_METADATA.items():
-
-            connection.execute(
-                """
-                INSERT INTO documents
-                (filename, title, path, total_words, page_count)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    filename,
-                    metadata["title"],
-                    metadata["path"],
-                    metadata["total_words"],
-                    metadata["page_count"],
-                ),
-            )
-
-        for term, posting_list in REAL_INVERTED_INDEX.items():
-
-            connection.executemany(
-                """
-                INSERT INTO term_postings
-                (term, filename, term_count)
-                VALUES (?, ?, ?)
-                """,
-                [
-                    (
-                        term,
-                        filename,
-                        count,
-                    )
-                    for filename, count
-                    in posting_list.items()
-                ],
-            )
-
-        for filename, filename_words in FILENAME_INDEX.items():
-
-            # Store unique terms only.
-            connection.executemany(
-                """
-                INSERT OR IGNORE INTO filename_terms
-                (filename, term)
-                VALUES (?, ?)
-                """,
-                [
-                    (
-                        filename,
-                        term,
-                    )
-                    for term in set(filename_words)
-                ],
-            )
-
-        for filename, pages in PAGE_TEXT_INDEX.items():
-
-            connection.executemany(
-                """
-                INSERT INTO pages
-                (filename, page_number, text)
-                VALUES (?, ?, ?)
-                """,
-                [
-                    (
-                        filename,
-                        page_data["page"],
-                        page_data["text"],
-                    )
-                    for page_data in pages
-                ],
-            )
-
-        connection.commit()
-
-    finally:
-
-        if close_connection:
-            connection.close()
-
-
-def load_database_from_sqlite():
-    """
-    Load the complete persisted SQLite snapshot into the existing
-    in-memory search structures once at application startup.
-    """
-
-    global REAL_INVERTED_INDEX
-    global DOCUMENT_METADATA
-    global FILENAME_INDEX
-    global PAGE_TEXT_INDEX
-
-    with get_sqlite_connection() as connection:
-
-        document_rows = connection.execute(
-            """
-            SELECT
-                filename,
-                title,
-                path,
-                total_words,
-                page_count
-            FROM documents
-            """
-        ).fetchall()
-
-        if not document_rows:
-            return
-
-        new_metadata = {}
-
-        for (
-            filename,
-            title,
-            path,
-            total_words,
-            page_count,
-        ) in document_rows:
-
-            new_metadata[filename] = {
-                "title": title,
-                "path": path,
-                "total_words": total_words,
-                "page_count": page_count,
-            }
-
-        new_inverted_index = {}
-
-        posting_rows = connection.execute(
-            """
-            SELECT
-                term,
-                filename,
-                term_count
-            FROM term_postings
-            """
-        ).fetchall()
-
-        for (
-            term,
-            filename,
-            term_count,
-        ) in posting_rows:
-
-            if term not in new_inverted_index:
-                new_inverted_index[term] = {}
-
-            new_inverted_index[term][
-                filename
-            ] = term_count
-
-        new_filename_index = {}
-
-        filename_rows = connection.execute(
-            """
-            SELECT
-                filename,
-                term
-            FROM filename_terms
-            ORDER BY filename, rowid
-            """
-        ).fetchall()
-
-        for filename, term in filename_rows:
-
-            new_filename_index.setdefault(
-                filename,
-                [],
-            ).append(term)
-
-        new_page_text_index = {}
-
-        page_rows = connection.execute(
-            """
-            SELECT
-                filename,
-                page_number,
-                text
-            FROM pages
-            ORDER BY filename, page_number
-            """
-        ).fetchall()
-
-        for (
-            filename,
-            page_number,
-            text,
-        ) in page_rows:
-
-            new_page_text_index.setdefault(
-                filename,
-                [],
-            ).append({
-                "page": page_number,
-                "text": text,
-            })
-
-        with INDEX_DATA_LOCK:
-
-            REAL_INVERTED_INDEX = (
-                new_inverted_index
-            )
-
-            DOCUMENT_METADATA = (
-                new_metadata
-            )
-
-            FILENAME_INDEX = (
-                new_filename_index
-            )
-
-            PAGE_TEXT_INDEX = (
-                new_page_text_index
-            )
-
-
-def get_document_term_counts_from_sqlite(
-    filename,
-):
-    with get_sqlite_connection() as connection:
-
-        rows = connection.execute(
-            """
-            SELECT term, term_count
-            FROM term_postings
-            WHERE filename = ?
-            """,
-            (filename,),
-        ).fetchall()
-
-    return dict(rows)
-
-
-def _remove_document_from_memory(
-    filename,
-    old_term_counts,
-):
-    """
-    Remove one document without rebuilding the corpus.
-
-    Posting-list dictionaries are replaced rather than mutated in-place,
-    so searches already holding a posting list keep a stable object.
-    """
-
-    for term in old_term_counts:
-
-        posting_list = (
-            REAL_INVERTED_INDEX.get(term)
-        )
-
-        if not posting_list:
-            continue
-
-        new_posting_list = dict(
-            posting_list
-        )
-
-        new_posting_list.pop(
-            filename,
-            None,
-        )
-
-        if new_posting_list:
-            REAL_INVERTED_INDEX[
-                term
-            ] = new_posting_list
-        else:
-            REAL_INVERTED_INDEX.pop(
-                term,
-                None,
-            )
-
-    DOCUMENT_METADATA.pop(
-        filename,
-        None,
-    )
-
-    FILENAME_INDEX.pop(
-        filename,
-        None,
-    )
-
-    PAGE_TEXT_INDEX.pop(
-        filename,
-        None,
-    )
-
-
-def _add_document_to_memory(
-    filename,
-    metadata,
-    filename_words,
-    pages,
-    content_words,
-):
-    DOCUMENT_METADATA[filename] = metadata
-
-    # Filename index is document-local.
-    FILENAME_INDEX[filename] = (
-        filename_words
-    )
-
-    PAGE_TEXT_INDEX[filename] = pages
-
-    # Each changed posting list gets a new dictionary object.
-    term_counts = {}
-
-    for word in content_words:
-        term_counts[word] = (
-            term_counts.get(word, 0) + 1
-        )
-
-    for term, count in term_counts.items():
-
-        old_postings = REAL_INVERTED_INDEX.get(
-            term,
-            {}
-        )
-
-        new_postings = dict(
-            old_postings
-        )
-
-        new_postings[filename] = count
-
-        REAL_INVERTED_INDEX[
-            term
-        ] = new_postings
-
-
-def incrementally_index_document(
-    filename,
-    file_path,
-    connection=None,
-    commit=True,
-):
-    """
-    Index exactly one document.
-
-    Complexity is proportional to the document being uploaded,
-    not to the number of existing documents.
-    """
-
-    text = extract_text(
-        file_path,
-        filename,
-    )
-
-    content_words = tokenize(
-        text
-    )
-
-    term_counts = {}
-
-    for word in content_words:
-        term_counts[word] = (
-            term_counts.get(word, 0)
-            + 1
-        )
-
-    pages = extract_pages(
-        file_path,
-        filename,
-    )
-
-    filename_without_extension = (
-        os.path.splitext(filename)[0]
-    )
-
-    filename_words = tokenize_filename(
-        filename_without_extension
-    )
-
-    if not content_words:
-        raise ValueError(
-            "Document contains no readable text."
-        )
-
-    metadata = {
-        "title": filename,
-        "path": os.path.abspath(
-            file_path
-        ),
-        "total_words": len(
-            content_words
-        ),
-        "page_count": len(
-            pages
-        ),
-    }
-
-    old_term_counts = (
-        get_document_term_counts_from_sqlite(
-            filename
-        )
-    )
-
-    with INDEX_DATA_LOCK:
-
-        _remove_document_from_memory(
-            filename,
-            old_term_counts,
-        )
-
-        _add_document_to_memory(
-            filename,
-            metadata,
-            filename_words,
-            pages,
-            content_words,
-        )
-
-    # Persist only this document and its postings.
-    own_connection = connection is None
-
-    if own_connection:
-        connection = get_sqlite_connection()
-
-    try:
-        connection.execute(
-            "DELETE FROM term_postings WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM filename_terms WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM pages WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM documents WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            """
-            INSERT INTO documents
-            (filename, title, path, total_words, page_count)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                filename,
-                metadata["title"],
-                metadata["path"],
-                metadata["total_words"],
-                metadata["page_count"],
-            ),
-        )
-
-        connection.executemany(
-            """
-            INSERT INTO term_postings
-            (term, filename, term_count)
-            VALUES (?, ?, ?)
-            """,
-            [
-                (
-                    term,
-                    filename,
-                    count,
-                )
-                for term, count in term_counts.items()
-            ],
-        )
-
-        connection.executemany(
-            """
-            INSERT OR IGNORE INTO filename_terms
-            (filename, term)
-            VALUES (?, ?)
-            """,
-            [
-                (
-                    filename,
-                    term,
-                )
-                for term in set(filename_words)
-            ],
-        )
-
-        connection.executemany(
-            """
-            INSERT INTO pages
-            (filename, page_number, text)
-            VALUES (?, ?, ?)
-            """,
-            [
-                (
-                    filename,
-                    page_data["page"],
-                    page_data["text"],
-                )
-                for page_data in pages
-            ],
-        )
-
-        if commit:
-            connection.commit()
-
-    finally:
-        if own_connection:
-            connection.close()
-
-    return metadata
-
-
-def incrementally_remove_document(
-    filename,
-    connection=None,
-    commit=True,
-):
-    """
-    Remove exactly one document from memory and SQLite.
-    """
-
-    old_term_counts = (
-        get_document_term_counts_from_sqlite(
-            filename
-        )
-    )
-
-    with INDEX_DATA_LOCK:
-
-        _remove_document_from_memory(
-            filename,
-            old_term_counts,
-        )
-
-    own_connection = connection is None
-
-    if own_connection:
-        connection = get_sqlite_connection()
-
-    try:
-        connection.execute(
-            "DELETE FROM term_postings WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM filename_terms WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM pages WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM documents WHERE filename = ?",
-            (filename,),
-        )
-
-        if commit:
-            connection.commit()
-
-    finally:
-        if own_connection:
-            connection.close()
-
-
-def queue_index_refresh():
-    """
-    Compatibility helper.
-
-    Incremental indexing normally makes a background rebuild unnecessary.
-    This remains available for an explicit full repair operation.
-    """
-
-    return False
-
-
-def load_database():
-
-    global REAL_INVERTED_INDEX
-    global DOCUMENT_METADATA
-    global FILENAME_INDEX
-    global PAGE_TEXT_INDEX
-
-    if os.path.exists(INDEX_FILE):
-
-        try:
-
-            with open(
-                INDEX_FILE,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                REAL_INVERTED_INDEX = json.load(
-                    file
-                )
-
-        except Exception as error:
-
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"content index: {error}"
-            )
-
-            REAL_INVERTED_INDEX = {}
-
-    if os.path.exists(META_FILE):
-
-        try:
-
-            with open(
-                META_FILE,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                DOCUMENT_METADATA = json.load(
-                    file
-                )
-
-        except Exception as error:
-
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"metadata: {error}"
-            )
-
-            DOCUMENT_METADATA = {}
-
-    if os.path.exists(FILENAME_INDEX_FILE):
-
-        try:
-
-            with open(
-                FILENAME_INDEX_FILE,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                FILENAME_INDEX = json.load(
-                    file
-                )
-
-        except Exception as error:
-
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"filename index: {error}"
-            )
-
-            FILENAME_INDEX = {}
-
-    if os.path.exists(PAGE_TEXT_FILE):
-
-        try:
-
-            with open(
-                PAGE_TEXT_FILE,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                PAGE_TEXT_INDEX = json.load(
-                    file
-                )
-
-        except Exception as error:
-
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"page text index: {error}"
-            )
-
-            PAGE_TEXT_INDEX = {}
-
-
-# ============================================================
-# DATABASE SAVE
-# ============================================================
-
-def atomic_write_json(path, data):
-    temp_path = path + ".tmp"
-
-    with open(
-        temp_path,
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(data, file, indent=2)
-        file.flush()
-        os.fsync(file.fileno())
-
-    os.replace(temp_path, path)
-
-
-def save_database_snapshot(
-    inverted_index,
-    document_metadata,
-    filename_index,
-    page_text_index,
-):
-    atomic_write_json(
-        INDEX_FILE,
-        inverted_index,
-    )
-
-    atomic_write_json(
-        META_FILE,
-        document_metadata,
-    )
-
-    atomic_write_json(
-        FILENAME_INDEX_FILE,
-        filename_index,
-    )
-
-    atomic_write_json(
-        PAGE_TEXT_FILE,
-        page_text_index,
-    )
-
-
-def save_database():
-    with INDEX_DATA_LOCK:
-        snapshot = (
-            REAL_INVERTED_INDEX,
-            DOCUMENT_METADATA,
-            FILENAME_INDEX,
-            PAGE_TEXT_INDEX,
-        )
-
-    save_database_snapshot(*snapshot)
-
-def rebuild_database():
-    """
-    Build a complete new index without mutating the active snapshot.
-
-    Searches continue to use the previous complete snapshot until the
-    new snapshot has been fully built and persisted. Then all four active
-    index dictionaries are swapped together.
-    """
-
-    print()
-    print("==============================================")
-    print("REBUILDING SEARCH DATABASE")
-    print("==============================================")
-
-    new_inverted_index = {}
-    new_document_metadata = {}
-    new_filename_index = {}
-    new_page_text_index = {}
-
-    for filename in os.listdir(DATA_FOLDER):
-
-        if not filename.lower().endswith(
-            SUPPORTED_EXTENSIONS
-        ):
-            continue
-
-        file_path = os.path.join(
-            DATA_FOLDER,
-            filename,
-        )
-
-        print(
-            f"[REBUILD] Indexing: {filename}"
-        )
-
-        try:
-            text = extract_text(
-                file_path,
-                filename,
-            )
-
-            content_words = tokenize(text)
-
-            filename_without_extension = (
-                os.path.splitext(filename)[0]
-            )
-
-            filename_words = tokenize_filename(
-                filename_without_extension
-            )
-
-            pages = extract_pages(
-                file_path,
-                filename,
-            )
-
-            if not content_words:
-                print(
-                    "[REBUILD] Skipped empty document: "
-                    f"{filename}"
-                )
-                continue
-
-            new_document_metadata[filename] = {
-                "title": filename,
-                "path": os.path.abspath(file_path),
-                "total_words": len(content_words),
-                "page_count": len(pages),
-            }
-
-            new_filename_index[
-                filename
-            ] = filename_words
-
-            new_page_text_index[
-                filename
-            ] = pages
-
-            for word in content_words:
-
-                if word not in new_inverted_index:
-                    new_inverted_index[word] = {}
-
-                if (
-                    filename
-                    not in new_inverted_index[word]
-                ):
-                    new_inverted_index[word][filename] = 0
-
-                new_inverted_index[word][filename] += 1
-
-        except Exception as error:
-
-            print(
-                f"[REBUILD ERROR] Could not index "
-                f"{filename}: {error}"
-            )
-
-            continue
-
-    print()
-    print(
-        "[REBUILD] New snapshot complete: "
-        f"{len(new_document_metadata)} documents, "
-        f"{len(new_inverted_index)} content terms, "
-        f"{len(new_filename_index)} filenames indexed, "
-        f"{len(new_page_text_index)} page-text entries"
-    )
-
-    # Write the full new snapshot first.
-    save_database_snapshot(
-        new_inverted_index,
-        new_document_metadata,
-        new_filename_index,
-        new_page_text_index,
-    )
-
-    global REAL_INVERTED_INDEX
-    global DOCUMENT_METADATA
-    global FILENAME_INDEX
-    global PAGE_TEXT_INDEX
-
-    # One pointer swap: searches see old or new, never a partial build.
-    with INDEX_DATA_LOCK:
-        REAL_INVERTED_INDEX = new_inverted_index
-        DOCUMENT_METADATA = new_document_metadata
-        FILENAME_INDEX = new_filename_index
-        PAGE_TEXT_INDEX = new_page_text_index
-
-    print(
-        "[REBUILD] Active snapshot swapped atomically."
-    )
-
-    # Keep SQLite synchronized after an explicit full rebuild.
-    with get_sqlite_connection() as connection:
-        sync_sqlite_from_memory(connection)
-
-    print()
-    print(
-        f"[REBUILD] Complete: "
-        f"{len(DOCUMENT_METADATA)} documents, "
-        f"{len(REAL_INVERTED_INDEX)} content terms, "
-        f"{len(FILENAME_INDEX)} filenames indexed, "
-        f"{len(PAGE_TEXT_INDEX)} page-text entries"
-    )
-
-    print("==============================================")
-    print()
-load_database()
-initialize_sqlite_store()
-
-set_index_status(
-    "READY",
-    "Search index is ready.",
-    completed_at=time.time(),
-    last_error=None,
-)
+STARTUP_COUNTS = ENGINE.counts()
 
 print(
     f"[DATABASE] Data folder: {DATA_FOLDER}"
@@ -1270,22 +234,22 @@ print(
 
 print(
     f"[DATABASE] Documents loaded: "
-    f"{len(DOCUMENT_METADATA)}"
+    f"{STARTUP_COUNTS['documents']}"
 )
 
 print(
     f"[DATABASE] Indexed content terms: "
-    f"{len(REAL_INVERTED_INDEX)}"
+    f"{STARTUP_COUNTS['content_terms']}"
 )
 
 print(
     f"[DATABASE] Filenames indexed: "
-    f"{len(FILENAME_INDEX)}"
+    f"{STARTUP_COUNTS['filenames_indexed']}"
 )
 
 print(
     f"[DATABASE] Page-text entries: "
-    f"{len(PAGE_TEXT_INDEX)}"
+    f"{STARTUP_COUNTS['page_text_entries']}"
 )
 
 
@@ -1316,7 +280,7 @@ def upload_file():
     rejected_files = []
     failed_files = []
 
-    connection = get_sqlite_connection()
+    connection = ENGINE.store.connection()
 
     try:
         for file in files:
@@ -1363,7 +327,7 @@ def upload_file():
                     file_path,
                 )
 
-                incrementally_index_document(
+                ENGINE.index_document(
                     safe_filename,
                     file_path,
                     connection=connection,
@@ -1423,12 +387,9 @@ def upload_file():
 
         connection.close()
 
-    set_index_status(
-        "READY",
-        "Search index is ready.",
-        completed_at=time.time(),
-        last_error=None,
-    )
+    ENGINE.mark_ready()
+
+    counts = ENGINE.counts()
 
     return jsonify({
         "message": (
@@ -1449,11 +410,13 @@ def upload_file():
         "rejected_count": len(rejected_files),
         "failed_count": len(failed_files),
         "indexing_started": False,
-        "indexing": get_index_status(),
-        "documents": len(DOCUMENT_METADATA),
-        "content_terms": len(REAL_INVERTED_INDEX),
-        "filenames_indexed": len(FILENAME_INDEX),
-        "page_text_entries": len(PAGE_TEXT_INDEX),
+        "indexing": ENGINE.index_status(),
+        "documents": counts["documents"],
+        "content_terms": counts["content_terms"],
+        "filenames_indexed":
+            counts["filenames_indexed"],
+        "page_text_entries":
+            counts["page_text_entries"],
     }), 200
 
 
@@ -1515,11 +478,16 @@ def execute_search():
     )
 
     # Capture one coherent active snapshot for this request.
-    with INDEX_DATA_LOCK:
-        active_inverted_index = REAL_INVERTED_INDEX
-        active_document_metadata = DOCUMENT_METADATA
-        active_filename_index = FILENAME_INDEX
-        active_page_text_index = PAGE_TEXT_INDEX
+    active_snapshot = ENGINE.snapshot()
+
+    active_inverted_index = active_snapshot.inverted_index
+    active_document_metadata = (
+        active_snapshot.document_metadata
+    )
+    active_filename_index = active_snapshot.filename_index
+    active_page_text_index = (
+        active_snapshot.page_text_index
+    )
 
     # Normalize document extensions before tokenization.
     # Examples:
@@ -2909,7 +1877,7 @@ def open_document(filename):
         safe_path
     )
 
-    if safe_filename not in DOCUMENT_METADATA:
+    if not ENGINE.has_document(safe_filename):
         return jsonify({
             "error":
                 "Document is not indexed."
@@ -2931,7 +1899,7 @@ def open_document(filename):
                 safe_path
             )
 
-            incrementally_remove_document(
+            ENGINE.remove_document(
                 safe_filename
             )
 
@@ -2942,12 +1910,7 @@ def open_document(filename):
                     f"Could not delete document: {error}"
             }), 500
 
-        set_index_status(
-            "READY",
-            "Search index is ready.",
-            completed_at=time.time(),
-            last_error=None,
-        )
+        ENGINE.mark_ready()
 
         print(
             "[DELETE] Removed and "
@@ -2955,23 +1918,25 @@ def open_document(filename):
             f"{safe_filename}"
         )
 
+        counts = ENGINE.counts()
+
         return jsonify({
             "message":
                 f"Deleted {safe_filename} successfully.",
             "deleted":
                 safe_filename,
             "documents":
-                len(DOCUMENT_METADATA),
+                counts["documents"],
             "content_terms":
-                len(REAL_INVERTED_INDEX),
+                counts["content_terms"],
             "filenames_indexed":
-                len(FILENAME_INDEX),
+                counts["filenames_indexed"],
             "page_text_entries":
-                len(PAGE_TEXT_INDEX),
+                counts["page_text_entries"],
             "indexing_started":
                 False,
             "indexing":
-                get_index_status(),
+                ENGINE.index_status(),
         }), 200
 
     return send_from_directory(
@@ -3042,7 +2007,7 @@ def bulk_delete_documents():
     not_found = []
     failed = []
 
-    connection = get_sqlite_connection()
+    connection = ENGINE.store.connection()
 
     try:
 
@@ -3055,8 +2020,8 @@ def bulk_delete_documents():
 
             try:
 
-                indexed_exists = (
-                    filename in DOCUMENT_METADATA
+                indexed_exists = ENGINE.has_document(
+                    filename
                 )
 
                 filesystem_exists = os.path.isfile(
@@ -3072,7 +2037,7 @@ def bulk_delete_documents():
                     )
                     continue
 
-                incrementally_remove_document(
+                ENGINE.remove_document(
                     filename,
                     connection=connection,
                     commit=False,
@@ -3109,12 +2074,9 @@ def bulk_delete_documents():
 
         connection.close()
 
-    set_index_status(
-        "READY",
-        "Search index is ready.",
-        completed_at=time.time(),
-        last_error=None,
-    )
+    ENGINE.mark_ready()
+
+    counts = ENGINE.counts()
 
     return jsonify({
         "message":
@@ -3126,11 +2088,11 @@ def bulk_delete_documents():
         "not_found_count": len(not_found),
         "failed_count": len(failed),
         "indexing_started": False,
-        "indexing": get_index_status(),
-        "documents": len(DOCUMENT_METADATA),
-        "content_terms": len(REAL_INVERTED_INDEX),
-        "filenames_indexed": len(FILENAME_INDEX),
-        "page_text_entries": len(PAGE_TEXT_INDEX),
+        "indexing": ENGINE.index_status(),
+        "documents": counts["documents"],
+        "content_terms": counts["content_terms"],
+        "filenames_indexed": counts["filenames_indexed"],
+        "page_text_entries": counts["page_text_entries"],
     }), 200
 
 
@@ -3157,7 +2119,7 @@ def rebuild_api():
             indexing_started,
 
         "indexing":
-            get_index_status(),
+            ENGINE.index_status(),
 
     }), 202
 
@@ -3167,28 +2129,16 @@ def rebuild_api():
     methods=["GET"]
 )
 def database_status():
+    """
+    Report corpus counters and indexing state.
 
-    return jsonify({
+    The payload comes straight from the engine, so the offline Android
+    status banner and this endpoint can never drift apart.
+    """
 
-        "documents":
-            len(DOCUMENT_METADATA),
-
-        "content_terms":
-            len(REAL_INVERTED_INDEX),
-
-        "filenames_indexed":
-            len(FILENAME_INDEX),
-
-        "page_text_entries":
-            len(PAGE_TEXT_INDEX),
-
-        "data_folder":
-            DATA_FOLDER,
-
-        "indexing":
-            get_index_status()
-
-    })
+    return jsonify(
+        ENGINE.status()
+    )
 
 
 # ============================================================
