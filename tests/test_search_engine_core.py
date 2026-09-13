@@ -18,6 +18,7 @@ catches the class of bug where a delete "works" in the UI but leaves a
 ghost posting behind.
 """
 
+import io
 import os
 import shutil
 import sqlite3
@@ -184,6 +185,27 @@ def documents_on_disk(engine):
     }
 
 
+def scratch_files(engine):
+    """Leftover .uploading / .replacing files an import should never keep."""
+
+    folder = engine.config.data_folder
+
+    return {
+        filename
+        for filename in os.listdir(folder)
+        if filename.endswith((".uploading", ".replacing"))
+    }
+
+
+def import_bytes(engine, name, payload):
+    """Import raw bytes under a filename, as an upload would."""
+
+    return engine.import_documents(
+        [(name, io.BytesIO(payload))],
+        log=lambda *_: None,
+    )
+
+
 def sqlite_documents(engine):
     """Filenames present in the SQLite documents table."""
 
@@ -248,11 +270,13 @@ def assert_consistent(engine):
     memory, a restart restored from SQLite, and a document opened from disk
     must all describe the same corpus.
 
-    One asymmetry is intentional and pre-existing: a supported file that has
-    no readable text is never indexed (an upload records it as failed, a
-    rebuild skips it) yet it does remain on disk. So the filesystem may hold
-    a superset of the index, and every extra file must be provably
-    unreadable. Anything else is a leak and fails here.
+    One asymmetry remains, narrowed to rebuild: a supported file already
+    sitting in the data folder that has no readable text is skipped by a
+    rebuild and so is on disk but not indexed. An upload no longer produces
+    that state -- a document that fails extraction leaves nothing behind, so
+    the filesystem may hold a superset of the index only through rebuild, and
+    every extra file must be provably unreadable. Anything else is a leak and
+    fails here.
     """
 
     from search_engine.extraction import extract_text
@@ -418,6 +442,206 @@ def test_import_replacement(engine, tmp_path):
     assert_consistent(engine)
 
 
+# Bytes no supported extractor can read: invalid UTF-8 for a .txt.
+UNREADABLE = bytes(range(128, 256))
+
+
+def test_failed_new_upload_leaves_nothing_on_disk(engine):
+    """
+    A document that cannot be extracted must not be written into the corpus.
+
+    Before this was pinned, import renamed the upload into place and only
+    then extracted, and the cleanup removed the temporary name -- which the
+    rename had already consumed. Every failed upload therefore left an
+    orphan file that no endpoint listed, no search reached and nothing ever
+    collected.
+    """
+
+    result = import_bytes(engine, "brandnew.txt", UNREADABLE)
+
+    assert result.failed_count == 1
+    assert result.created_count == 0
+    assert result.replaced_count == 0
+    assert result.failed[0]["filename"] == "brandnew.txt"
+
+    assert not os.path.exists(
+        os.path.join(engine.config.data_folder, "brandnew.txt")
+    )
+
+    assert engine.counts()["documents"] == 0
+    assert scratch_files(engine) == set()
+
+    assert_consistent(engine)
+
+
+def test_failed_replacement_restores_the_previous_document(engine):
+    """
+    A failed re-upload must not destroy the document it was replacing.
+
+    This is the serious half of the same defect: the new bytes were renamed
+    over the existing file before extraction, so a rejected replacement
+    overwrote a good document. The index kept serving the old content while
+    the disk held unreadable bytes, and the next rebuild -- reading the disk
+    -- dropped the document entirely. The failure was reported, and the data
+    was gone anyway.
+    """
+
+    good = b"quarterly revenue growth analysis important"
+
+    first = import_bytes(engine, "report.txt", good)
+    assert first.created_count == 1
+
+    counts_before = engine.counts()
+
+    second = import_bytes(engine, "report.txt", UNREADABLE)
+
+    assert second.failed_count == 1
+    assert second.replaced_count == 0
+    assert second.created_count == 0
+
+    path = os.path.join(engine.config.data_folder, "report.txt")
+
+    # The good bytes are still the bytes on disk.
+    with open(path, "rb") as file:
+        assert file.read() == good
+
+    # The index is untouched, and still agrees with the disk.
+    assert engine.counts() == counts_before
+
+    assert engine.has_document("report.txt")
+
+    # And a rebuild, which reads the disk, keeps the document.
+    engine.rebuild()
+
+    assert engine.has_document("report.txt")
+    assert engine.counts() == counts_before
+
+    assert scratch_files(engine) == set()
+
+    assert_consistent(engine)
+
+
+def test_failed_replacement_leaves_search_serving_readable_bytes(engine):
+    """
+    The invariant that actually matters to a user: if search returns a
+    document, opening it must yield the text that matched.
+
+    With the old ordering this broke silently. The stale index still matched
+    the document while the file behind it had already been overwritten with
+    unreadable bytes, so every hit was a dead link.
+    """
+
+    from search_engine.extraction import extract_text
+
+    good = b"quarterly revenue growth analysis important"
+
+    import_bytes(engine, "report.txt", good)
+
+    import_bytes(engine, "report.txt", UNREADABLE)
+
+    page = engine.search("quarterly revenue")
+
+    results = page["results"] if isinstance(page, dict) else page
+
+    assert results, "the good document should still be findable"
+
+    metadata = engine.get_document("report.txt")
+
+    assert metadata is not None
+
+    assert extract_text(
+        metadata["path"],
+        "report.txt",
+    ).strip(), "search returned a document whose bytes are unreadable"
+
+
+def test_import_leaves_no_scratch_files(engine, tmp_path):
+    """
+    Neither the .uploading nor the .replacing name may survive a batch,
+    whether its documents succeed or fail.
+
+    assert_consistent cannot catch these: it only looks at supported
+    extensions, and a scratch file ends in neither. They would accumulate
+    forever in the data folder.
+    """
+
+    paths = sample_corpus(tmp_path)
+
+    import_paths(engine, paths)
+
+    assert scratch_files(engine) == set()
+
+    # Replace one successfully, and fail one.
+    import_bytes(
+        engine,
+        os.path.basename(paths[0]),
+        b"completely different replacement content here",
+    )
+
+    import_bytes(engine, os.path.basename(paths[1]), UNREADABLE)
+
+    assert scratch_files(engine) == set()
+
+    assert_consistent(engine)
+
+
+def test_repeated_failed_replacements_do_not_degrade_the_document(engine):
+    """
+    The rollback has to be repeatable: every failed attempt must step the
+    original aside and put it back again, not consume it on the first try.
+    """
+
+    good = b"stable original content that must survive"
+
+    import_bytes(engine, "spec.txt", good)
+
+    path = os.path.join(engine.config.data_folder, "spec.txt")
+
+    for attempt in range(5):
+
+        result = import_bytes(engine, "spec.txt", UNREADABLE)
+
+        assert result.failed_count == 1, attempt
+
+        with open(path, "rb") as file:
+            assert file.read() == good, attempt
+
+    assert engine.counts()["documents"] == 1
+    assert scratch_files(engine) == set()
+
+    assert_consistent(engine)
+
+
+def test_a_mixed_batch_still_commits_its_good_documents(engine):
+    """
+    Cleaning up after failures must not tighten into all-or-nothing: one bad
+    document in a batch still leaves the good ones indexed, in one
+    transaction.
+    """
+
+    result = engine.import_documents(
+        [
+            ("alpha.txt", io.BytesIO(b"alpha content one")),
+            ("broken.txt", io.BytesIO(UNREADABLE)),
+            ("beta.txt", io.BytesIO(b"beta content two")),
+        ],
+        log=lambda *_: None,
+    )
+
+    assert result.created == ["alpha.txt", "beta.txt"]
+    assert [f["filename"] for f in result.failed] == ["broken.txt"]
+
+    assert engine.counts()["documents"] == 2
+
+    assert not os.path.exists(
+        os.path.join(engine.config.data_folder, "broken.txt")
+    )
+
+    assert scratch_files(engine) == set()
+
+    assert_consistent(engine)
+
+
 def test_import_unsupported_file_is_rejected(engine, tmp_path):
 
     path = make_txt(
@@ -537,6 +761,204 @@ def test_index_document_rejects_empty_file(engine, tmp_path):
         )
 
     assert "no readable text" in str(error.value)
+
+
+def test_index_extracted_matches_index_document(tmp_path):
+    """
+    Indexing pre-extracted text must produce exactly the index that
+    indexing the file produces.
+
+    This is the claim the offline Android architecture rests on: a device
+    ships text extracted by this engine and indexes that text without a PDF
+    parser, so it never needs a parser matching PyPDF2. If the two paths
+    diverged, that design would be broken and a device would rank the shipped
+    corpus differently from the server. This is where it would show.
+
+    Nothing is mocked. One engine imports the real files through the normal
+    stream path; the other indexes the text those files extract to. The
+    documents are copied into the second engine's folder as well, because on
+    a device the file is copied into app-private storage and the text arrives
+    beside it - so both engines are checked against the same consistency
+    invariant.
+    """
+
+    from search_engine.extraction import (
+        extract_pages,
+        extract_text,
+    )
+    from search_engine.filenames import (
+        sanitize_upload_filename,
+    )
+
+    corpus = sample_corpus(tmp_path)
+
+    files_folder = os.path.abspath(
+        str(tmp_path / "from_files")
+    )
+
+    text_folder = os.path.abspath(
+        str(tmp_path / "from_text")
+    )
+
+    os.makedirs(files_folder, exist_ok=True)
+    os.makedirs(text_folder, exist_ok=True)
+
+    from_files = SearchEngine(
+        EngineConfig(data_folder=files_folder)
+    )
+
+    from_text = SearchEngine(
+        EngineConfig(data_folder=text_folder)
+    )
+
+    import_paths(from_files, corpus)
+
+    for path in corpus:
+
+        filename = sanitize_upload_filename(
+            os.path.basename(path)
+        )
+
+        shutil.copy(
+            path,
+            os.path.join(text_folder, filename),
+        )
+
+        from_text.index_extracted(
+            filename,
+            extract_text(path, filename),
+            extract_pages(path, filename),
+        )
+
+    assert_consistent(from_files)
+    assert_consistent(from_text)
+
+    # Same corpus, same sizes, same persisted rows.
+    assert from_files.counts() == from_text.counts()
+
+    assert sqlite_documents(from_files) == sqlite_documents(
+        from_text
+    )
+
+    assert sqlite_postings(from_files) == sqlite_postings(
+        from_text
+    )
+
+    # Same in-memory structures.
+    source = from_files.snapshot()
+    target = from_text.snapshot()
+
+    assert source.inverted_index == target.inverted_index
+    assert source.filename_index == target.filename_index
+    assert source.page_text_index == target.page_text_index
+
+    # Metadata agrees on everything but the recorded path, which points at
+    # each engine's own data folder.
+    assert set(source.document_metadata) == set(
+        target.document_metadata
+    )
+
+    for filename in sorted(source.document_metadata):
+
+        expected = dict(source.document_metadata[filename])
+        actual = dict(target.document_metadata[filename])
+
+        assert expected.pop("path") == os.path.join(
+            files_folder,
+            filename,
+        )
+
+        assert actual.pop("path") == os.path.join(
+            text_folder,
+            filename,
+        )
+
+        assert expected == actual, filename
+
+    # And the same answers, which is the property a user would notice.
+    queries = [
+        "",
+        "network",
+        "Network Notes.pdf",
+        '"network"',
+        "normalization",
+        "999",
+        "transactions",
+        "the",
+        "pdf",
+        "docx",
+        "zzzqqq",
+    ]
+
+    for query in queries:
+
+        assert canonicalize_data_folder(
+            from_files.search(query),
+            files_folder,
+        ) == canonicalize_data_folder(
+            from_text.search(query),
+            text_folder,
+        ), query
+
+
+def test_index_extracted_rejects_text_with_no_words(engine):
+    """
+    The empty-document rule is enforced on the text path too.
+
+    A sidecar carrying an empty extraction must be rejected exactly as an
+    unreadable file is, rather than indexed as a document that can never be
+    found.
+    """
+
+    with pytest.raises(ValueError) as error:
+
+        engine.index_extracted(
+            "blank.txt",
+            "",
+            [{"page": 1, "text": ""}],
+        )
+
+    assert "no readable text" in str(error.value)
+
+    assert engine.counts()["documents"] == 0
+
+
+def test_index_extracted_records_a_page_count_from_the_pages(
+    engine,
+    tmp_path,
+):
+    """
+    `page_count` comes from the pages supplied, not from the file.
+
+    A device indexing bundled text has no parser to ask, so the sidecar's
+    page list is authoritative. Pinning this keeps a port from silently
+    recording one page for everything and losing page numbers in snippets.
+    """
+
+    engine.index_extracted(
+        "lecture.txt",
+        "first page text second page text third page text",
+        [
+            {"page": 1, "text": "first page text"},
+            {"page": 2, "text": "second page text"},
+            {"page": 3, "text": "third page text"},
+        ],
+    )
+
+    metadata = engine.get_document_metadata("lecture.txt")
+
+    assert metadata["page_count"] == 3
+
+    assert metadata["path"] == os.path.join(
+        engine.config.data_folder,
+        "lecture.txt",
+    )
+
+    # Snippets and page numbers are cut from the supplied pages.
+    result = engine.search("third")
+
+    assert result["results"]
+    assert result["results"][0]["page"] == 3
 
 
 # ============================================================
@@ -862,12 +1284,15 @@ def test_bulk_delete_rolls_back_sqlite_on_failure(
     document must not discard nine good ones. This test forces the commit
     itself to fail, which is the batch-level fault.
 
-    Known limitation, preserved from the original implementation and pinned
-    here on purpose: memory is mutated before the commit, so after a
-    rollback the in-memory index and SQLite disagree until the next
-    rebuild. Fixing that is a deliberate behavior change tracked separately;
-    this test documents today's contract so the change is visible when it
-    happens.
+    The rollback must leave ALL THREE stores agreeing. That is the point of
+    a transaction: either the batch happened or it did not. A rollback that
+    keeps the SQLite rows but has already dropped the in-memory entries and
+    deleted the files leaves the engine serving results for documents that
+    no longer exist on disk, with no way to notice until a rebuild.
+
+    The original implementation mutated memory and the filesystem inside the
+    loop, before the commit, so a rollback left them diverged. The engine now
+    defers both until after the commit succeeds.
     """
 
     seeded_engine(engine, tmp_path)
@@ -922,27 +1347,38 @@ def test_bulk_delete_rolls_back_sqlite_on_failure(
     # The transactional guarantee holds: SQLite kept every document.
     assert len(sqlite_documents(engine)) == 3
 
-    # Known limitation, pinned deliberately: the filesystem removal and the
-    # in-memory mutation are not participants in the transaction, so they
-    # already happened. This matches the original implementation.
-    assert not os.path.isfile(
+    # And so do the other two stores. Nothing was mutated, because nothing
+    # was committed: the files are still on disk and memory still serves
+    # them.
+    assert os.path.isfile(
         os.path.join(
             engine.config.data_folder,
             "security.txt",
         )
     )
-    assert not engine.has_document("security.txt")
+    assert os.path.isfile(
+        os.path.join(
+            engine.config.data_folder,
+            "Network_Notes.pdf",
+        )
+    )
+    assert engine.has_document("security.txt")
+    assert engine.has_document("Network_Notes.pdf")
+    assert engine.counts()["documents"] == 3
 
-    # Recovery path: a restart reloads from SQLite (the authoritative
-    # store), and a rebuild re-synchronizes all three stores with what is
-    # actually on disk.
+    assert_consistent(engine)
+
+    # The batch is still searchable - the rollback did not corrupt the
+    # in-memory index that searches read from.
+    payload = engine.search("security")
+
+    assert payload["pagination"]["total"] > 0
+
+    # No rebuild is needed to recover. A restart sees the same three
+    # documents, because all three stores still agree.
     reloaded = SearchEngine(engine.config)
 
     assert reloaded.counts()["documents"] == 3
-
-    reloaded.rebuild(log=lambda *args: None)
-
-    assert reloaded.counts()["documents"] == 1
 
     assert_consistent(reloaded)
 
@@ -984,6 +1420,137 @@ def test_bulk_delete_empty_request(engine, tmp_path):
     assert result.deleted_count == 0
 
     assert engine.counts()["documents"] == 3
+
+
+def test_bulk_delete_removes_a_file_that_is_not_indexed(
+    engine,
+    tmp_path,
+):
+    """
+    On disk but absent from the index: the file is still removed.
+
+    The mirror image of `test_bulk_delete_repairs_missing_file`. A caller
+    asking to delete a name expects the document gone from the corpus, and
+    "not indexed" is not a reason to leave a stray readable file behind
+    where the next rebuild would silently pick it back up.
+    """
+
+    seeded_engine(engine, tmp_path)
+
+    stray_path = os.path.join(
+        engine.config.data_folder,
+        "stray_notes.txt",
+    )
+
+    with open(stray_path, "w", encoding="utf-8") as file:
+        file.write("stray content never indexed\n")
+
+    assert os.path.isfile(stray_path)
+    assert not engine.has_document("stray_notes.txt")
+
+    result = engine.bulk_delete([
+        "stray_notes.txt",
+        "security.txt",
+    ])
+
+    assert sorted(result.deleted) == [
+        "security.txt",
+        "stray_notes.txt",
+    ]
+    assert result.not_found_count == 0
+    assert result.failed_count == 0
+
+    assert not os.path.isfile(stray_path)
+    assert not os.path.isfile(
+        os.path.join(
+            engine.config.data_folder,
+            "security.txt",
+        )
+    )
+
+    # The stray file was never in the index, so only the real document
+    # changed the counts.
+    assert engine.counts()["documents"] == 2
+
+    assert_consistent(engine)
+
+
+def test_bulk_delete_orphans_the_file_when_unlinking_fails(
+    engine,
+    tmp_path,
+    monkeypatch,
+):
+    """
+    Phase 2 can only fail after the commit has succeeded.
+
+    When the stored file cannot be unlinked, the document is genuinely
+    unindexed - SQLite and memory agree, because the transaction committed -
+    and the file is left behind as an orphan. That is the recoverable
+    direction: a rebuild re-indexes it. The unrecoverable direction would be
+    a deleted file whose index rows survived a rollback, which is what the
+    two-phase ordering exists to prevent.
+
+    Note the orphan is a real inconsistency, so `assert_consistent` is not
+    called here: it deliberately fails on a readable file that is not
+    indexed. This test pins the divergence and its recovery instead.
+    """
+
+    seeded_engine(engine, tmp_path)
+
+    assert engine.counts()["documents"] == 3
+
+    real_remove = os.remove
+
+    def refusing_remove(path):
+
+        if str(path).endswith("security.txt"):
+            raise OSError("simulated permission denied")
+
+        return real_remove(path)
+
+    monkeypatch.setattr(os, "remove", refusing_remove)
+
+    result = engine.bulk_delete([
+        "security.txt",
+        "Network_Notes.pdf",
+    ])
+
+    monkeypatch.undo()
+
+    # The unlinkable document is reported as failed, with a reason that says
+    # what actually happened rather than a bare OS message.
+    assert result.failed_count == 1
+    assert result.failed[0]["filename"] == "security.txt"
+    assert "could not be removed" in result.failed[0]["reason"]
+
+    # The deletable one still succeeded: one bad document does not discard
+    # the rest of the batch.
+    assert result.deleted == ["Network_Notes.pdf"]
+
+    # Memory and SQLite agree with each other, and both say the orphan is
+    # unindexed. Two of three documents were requested; both left the index.
+    assert not engine.has_document("security.txt")
+    assert "security.txt" not in sqlite_documents(engine)
+    assert engine.counts()["documents"] == 1
+    assert engine.has_document("Database_Guide.docx")
+
+    # The file itself is still there - that is the orphan.
+    assert os.path.isfile(
+        os.path.join(
+            engine.config.data_folder,
+            "security.txt",
+        )
+    )
+
+    # Recovery: a rebuild picks the orphan back up, and all three stores
+    # agree again. Network_Notes.pdf is really gone, so the corpus is now
+    # the untouched DOCX plus the resurrected TXT.
+    engine.rebuild(log=lambda *args: None)
+
+    assert engine.has_document("security.txt")
+    assert engine.counts()["documents"] == 2
+
+    assert_consistent(engine)
 
 
 # ============================================================
@@ -2231,6 +2798,160 @@ def test_ranking_is_stable_across_hash_seeds(tmp_path):
     )
 
 
+def canonicalize_data_folder(payload, data_folder):
+    """
+    Serialize a payload with its absolute data folder replaced.
+
+    Two corpora living in different directories differ in exactly one
+    observable way: the `path` metadata records where the file is. Nothing
+    else should depend on that, so replacing the folder makes the payloads
+    directly comparable. JSON also fixes key order, which dict comparison
+    would otherwise leave to luck.
+    """
+
+    import json
+
+    return json.dumps(
+        payload,
+        sort_keys=True,
+    ).replace(
+        data_folder,
+        "{{data_folder}}",
+    )
+
+
+def test_same_corpus_in_different_directories_ranks_identically(tmp_path):
+    """
+    Where the corpus lives must not change how it ranks.
+
+    Complements the hash-seed test: that one holds the directory constant and
+    varies the interpreter, this one varies the directory and holds the
+    interpreter constant. Both are needed because the two ways ordering used
+    to leak were independent - a permuted filename word order, and a rebuild
+    that enumerated the folder in filesystem order.
+
+    The two corpora are also imported in opposite orders and then rebuilt, so
+    neither import order nor location can survive into the result. A ranking
+    that depended on either would show up as a tie ordering difference.
+
+    The four `uniform_*.txt` documents exist to create that difference on
+    purpose. They carry identical content and identical filename weight, so
+    they tie exactly, and a stable sort leaves them in enumeration order.
+    Without them every query here has distinct scores and the test would pass
+    even against a rebuild that enumerated the folder in filesystem order -
+    which is precisely the regression it is meant to catch. They are created
+    in non-alphabetical order so creation order and sorted order disagree.
+    """
+
+    corpus = sample_corpus(tmp_path)
+
+    tie_directory = str(tmp_path / "ties")
+
+    for name in ("zulu", "mike", "alpha", "bravo"):
+
+        corpus.append(
+            make_txt(
+                tie_directory,
+                f"uniform {name}.txt",
+                "shared body text so the scores tie exactly\n",
+            )
+        )
+
+    queries = [
+        "",
+        "network",
+        "Network Notes.pdf",
+        '"network"',
+        "security",
+        "normalization",
+        "999",
+        "the",
+        "pdf",
+        "zzzqqq",
+        # The tie-sensitive one: four equal scores, so the order is decided
+        # entirely by how the rebuild enumerated the folder.
+        "uniform",
+        "shared",
+    ]
+
+    runs = []
+
+    tie_payloads = []
+
+    for name, ordered in (
+        ("alpha", corpus),
+        ("beta", list(reversed(corpus))),
+    ):
+
+        data_folder = os.path.abspath(
+            str(tmp_path / name)
+        )
+
+        os.makedirs(data_folder, exist_ok=True)
+
+        engine = SearchEngine(
+            EngineConfig(data_folder=data_folder)
+        )
+
+        import_paths(engine, ordered)
+
+        engine.rebuild(log=lambda *args: None)
+
+        assert_consistent(engine)
+
+        payloads = [
+            engine.search(query)
+            for query in queries
+        ]
+
+        # The "uniform" query is the tie case; keep it for the guard below.
+        tie_payloads.append(payloads[queries.index("uniform")])
+
+        runs.append([
+            canonicalize_data_folder(payload, data_folder)
+            for payload in payloads
+        ])
+
+    assert runs[0] == runs[1], (
+        "the same corpus ranked differently in two directories"
+    )
+
+    # Guard the guard. Without these the comparison could pass by never
+    # exercising anything: the corpora must really have been indexed, and the
+    # tie query must really have produced equal scores in an order that only
+    # enumeration decides.
+    assert "Network_Notes.pdf" in runs[0][1]
+
+    for payload in tie_payloads:
+
+        titles = [
+            item["title"]
+            for item in payload["results"]
+        ]
+
+        scores = {
+            item["score"]
+            for item in payload["results"]
+        }
+
+        assert len(titles) == 4, titles
+
+        assert len(scores) == 1, (
+            f"the tie documents did not tie: {scores}"
+        )
+
+    # And the agreed order is the sorted one, not either import order.
+    assert [
+        item["title"]
+        for item in tie_payloads[0]["results"]
+    ] == [
+        "uniform_alpha.txt",
+        "uniform_bravo.txt",
+        "uniform_mike.txt",
+        "uniform_zulu.txt",
+    ]
+
+
 def test_filename_terms_persist_in_tokenization_order(engine, tmp_path):
     """
     Row order in filename_terms must equal tokenization order.
@@ -2580,3 +3301,158 @@ def test_engine_has_no_web_stack_dependency():
                     ))
 
     assert offenders == []
+
+
+def test_flask_adapter_has_no_domain_logic():
+    """
+    The complementary half of the architecture rule.
+
+    `test_engine_has_no_web_stack_dependency` proves the core does not reach
+    up into the transport. This proves the adapter does not reach down into
+    the domain. app.py is allowed to parse requests, map engine results onto
+    HTTP responses, and own background scheduling - the three things that are
+    genuinely transport concerns. It is not allowed to tokenize, extract,
+    score, paginate, or touch SQLite, because every one of those would be a
+    second implementation that an offline backend does not share.
+
+    Enforced over the AST rather than by grepping for words, for the same
+    reason as the core-side guard: the module legitimately discusses ranking
+    in its docstrings.
+
+    Two lists, because the boundary is not symmetric. Imports are an allowlist
+    (a new dependency is a decision worth failing a test over); domain calls
+    are a denylist (the specific functions that would duplicate the engine).
+    """
+
+    import ast
+
+    repository_root = os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))
+    )
+
+    adapter_path = os.path.join(
+        repository_root,
+        "app.py",
+    )
+
+    assert os.path.isfile(adapter_path)
+
+    tree = ast.parse(
+        open(adapter_path, encoding="utf-8").read(),
+        filename=adapter_path,
+    )
+
+    # Transport, runtime, and the engine's public adapter surface. Anything
+    # else means the adapter grew a dependency it should not have.
+    allowed_modules = {
+        "flask",
+        "flask_cors",
+        "os",
+        "threading",
+        "time",
+        "search_engine.config",
+        "search_engine.engine",
+        "search_engine.filenames",
+        "search_engine.results",
+    }
+
+    # The engine internals. Reaching past the facade into these is how a
+    # second ranking implementation starts.
+    forbidden_internals = {
+        "search_engine.search",
+        "search_engine.storage",
+        "search_engine.tokenizer",
+        "search_engine.extraction",
+        "search_engine.index",
+        "search_engine.rebuild",
+        "search_engine.snippets",
+        "search_engine.pagination",
+        "search_engine.query",
+        "search_engine.status",
+    }
+
+    # Modules whose presence would mean the adapter is doing domain work
+    # itself: parsing documents, ranking, or persisting.
+    forbidden_modules = forbidden_internals | {
+        "sqlite3",
+        "json",
+        "math",
+        "re",
+        "shutil",
+        "PyPDF2",
+        "docx",
+    }
+
+    # Functions that would duplicate the engine. Note that
+    # normalize_requested_filenames is permitted: validating a request body
+    # before it reaches the engine is an adapter's job.
+    forbidden_calls = {
+        "tokenize",
+        "tokenize_filename",
+        "extract_text",
+        "extract_pages",
+        "search_documents",
+        "build_snapshot_from_folder",
+        "paginate",
+        "empty_query_response",
+        "secure_filename",
+        "sanitize_upload_filename",
+        "normalize_search_query",
+        "parse_filetype_filter",
+        "build_snippet_result",
+        "get_snippet_and_page",
+        "count_phrase_occurrences",
+        "read_json_snapshot",
+        "write_json_snapshot",
+        "atomic_write_json",
+    }
+
+    offenders = []
+
+    for node in ast.walk(tree):
+
+        if isinstance(node, ast.Import):
+
+            for alias in node.names:
+
+                if alias.name not in allowed_modules:
+                    offenders.append((
+                        node.lineno,
+                        f"import {alias.name}",
+                    ))
+
+        elif isinstance(node, ast.ImportFrom):
+
+            module = node.module or ""
+
+            if module in forbidden_modules:
+                offenders.append((
+                    node.lineno,
+                    f"from {module}",
+                ))
+
+            elif module not in allowed_modules:
+                offenders.append((
+                    node.lineno,
+                    f"from {module}",
+                ))
+
+        elif isinstance(node, ast.Call):
+
+            if isinstance(node.func, ast.Name):
+                label = node.func.id
+            elif isinstance(node.func, ast.Attribute):
+                label = node.func.attr
+            else:
+                continue
+
+            if label in forbidden_calls:
+                offenders.append((
+                    node.lineno,
+                    f"{label}()",
+                ))
+
+    assert offenders == [], (
+        "app.py is no longer a thin adapter; move this domain logic into "
+        f"search_engine/: {offenders}"
+    )

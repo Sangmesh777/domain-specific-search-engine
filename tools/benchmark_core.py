@@ -33,7 +33,6 @@ import os
 import random
 import resource
 import shutil
-import statistics
 import sys
 import tempfile
 import time

@@ -9,7 +9,9 @@ aspirational.
 The engine exposes business operations, not implementation details:
 
     engine.load()                  startup: legacy JSON, then SQLite
-    engine.index_document(...)     index/replace one document
+    engine.index_document(...)     index/replace one document from a file
+    engine.index_extracted(...)    index one document from text extracted
+                                   elsewhere (the offline backend's path)
     engine.import_documents(...)   import a batch in ONE transaction
     engine.remove_document(...)    unindex one document
     engine.delete(...)             delete one document (file + index + db)
@@ -105,6 +107,22 @@ def _write_stream_to_path(stream, path):
             destination,
             _STREAM_BUFFER_SIZE,
         )
+
+
+def _discard_path(path):
+    """
+    Remove a scratch file if it is there, ignoring a missing one.
+
+    Used for the temporary, backup and rejected-upload files an import
+    leaves behind. Cleanup must never mask the real error, so an OSError
+    is swallowed: a leftover scratch file is a wart, while losing the
+    original exception would hide why the upload failed.
+    """
+
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 class SearchEngine:
@@ -400,6 +418,13 @@ class SearchEngine:
         Raises ValueError when the document has no readable text, which is
         how an empty or unparseable upload is rejected.
 
+        This owns extraction and nothing else: it reads the file, then hands
+        the text to index_extracted, which is where tokenizing, scoring and
+        persistence happen. Keeping the split there means a caller that
+        already has the text - an offline backend indexing a pre-extracted
+        shipped corpus - goes through the identical path instead of a second
+        one.
+
         Returns the document metadata.
         """
 
@@ -407,6 +432,59 @@ class SearchEngine:
             file_path,
             filename,
         )
+
+        pages = extract_pages(
+            file_path,
+            filename,
+        )
+
+        return self.index_extracted(
+            filename,
+            text,
+            pages,
+            source_path=file_path,
+            connection=connection,
+            commit=commit,
+        )
+
+    def index_extracted(
+        self,
+        filename,
+        text,
+        pages,
+        source_path=None,
+        connection=None,
+        commit=True,
+    ):
+        """
+        Index one document from text that was extracted somewhere else.
+
+        This is the entry point the offline Android backend indexes its
+        shipped corpus through. Document extraction is the one part of the
+        engine that does not port: PyPDF2 and python-docx have no Android
+        equivalent producing identical output, so a device that parsed the
+        PDFs itself would rank them differently from the server. Extracting
+        once, here, and shipping the text removes that divergence instead of
+        chasing it. See ANDROID.md sections 7 and 20.
+
+        It is also how the golden vectors are consumed: they record extracted
+        page text, so a port can validate ranking without a parser.
+
+        `text` is the full lowercased document text that term frequencies are
+        counted from - exactly what extract_text returns. `pages` is the list
+        of {"page": n, "text": ...} views that snippets and page numbers are
+        cut from - exactly what extract_pages returns. Passing anything else
+        produces an index that disagrees with one built from the file.
+
+        `source_path` is the absolute path recorded in the document metadata,
+        which is what an adapter resolves to open the file later. It defaults
+        to the document's location in the data folder, because on a device the
+        text arrives from a bundled asset while the document itself has
+        already been copied into app-private storage.
+
+        Everything after extraction is shared with index_document, so there is
+        one tokenizing, scoring and persistence path rather than two.
+        """
 
         content_words = tokenize(text)
 
@@ -417,11 +495,6 @@ class SearchEngine:
                 term_counts.get(word, 0)
                 + 1
             )
-
-        pages = extract_pages(
-            file_path,
-            filename,
-        )
 
         filename_without_extension = (
             os.path.splitext(filename)[0]
@@ -436,9 +509,14 @@ class SearchEngine:
                 "Document contains no readable text."
             )
 
+        if source_path is None:
+            source_path = self.config.document_path(
+                filename
+            )
+
         metadata = {
             "title": filename,
-            "path": os.path.abspath(file_path),
+            "path": os.path.abspath(source_path),
             "total_words": len(content_words),
             "page_count": len(pages),
         }
@@ -546,8 +624,15 @@ class SearchEngine:
         2. write the bytes to `<name>.uploading`, then atomically rename
         3. index it into memory and into the shared transaction
 
+        Step 2 first steps any existing document of the same name aside to
+        `<name>.replacing`. That is what makes a replacement safe: if step 3
+        fails, the document that was there is put back and the rejected bytes
+        are discarded, so the index and the disk still describe the same file.
+        Without it a failed re-upload overwrote a good document, the stale
+        index kept serving it, and the next rebuild silently dropped it.
+
         A document that cannot be extracted or indexed is recorded as a
-        failure and its temporary file is removed, but the rest of the batch
+        failure and leaves nothing behind on disk, but the rest of the batch
         still commits: one bad upload must not discard nine good ones. The
         transaction is rolled back only if the batch itself fails.
 
@@ -590,6 +675,7 @@ class SearchEngine:
                 )
 
                 temp_path = file_path + ".uploading"
+                backup_path = file_path + ".replacing"
 
                 try:
 
@@ -597,6 +683,16 @@ class SearchEngine:
                         stream,
                         temp_path,
                     )
+
+                    # Step the existing document aside before overwriting
+                    # it, so a replacement that fails extraction can be
+                    # rolled back instead of destroying the good copy.
+                    # A rename, not a copy: no second read of the bytes.
+                    if existed_before:
+                        os.replace(
+                            file_path,
+                            backup_path,
+                        )
 
                     os.replace(
                         temp_path,
@@ -609,6 +705,10 @@ class SearchEngine:
                         connection=connection,
                         commit=False,
                     )
+
+                    # The new document is indexed, so the copy that was
+                    # stepped aside is no longer needed.
+                    _discard_path(backup_path)
 
                     result.uploaded.append(
                         safe_filename
@@ -640,11 +740,22 @@ class SearchEngine:
 
                 except Exception as error:
 
-                    if os.path.exists(temp_path):
+                    _discard_path(temp_path)
+
+                    if os.path.exists(backup_path):
+                        # A replacement failed: put the document that was
+                        # there back, so the index and the disk still agree.
                         try:
-                            os.remove(temp_path)
+                            os.replace(
+                                backup_path,
+                                file_path,
+                            )
                         except OSError:
-                            pass
+                            _discard_path(backup_path)
+                    else:
+                        # A brand-new document failed: leave no orphan
+                        # behind that nothing indexes and nothing serves.
+                        _discard_path(file_path)
 
                     result.failed.append({
                         "filename": safe_filename,
@@ -803,11 +914,23 @@ class SearchEngine:
         unindexed and counted as deleted, which is how a half-removed
         document is repaired.
 
-        Known limitation, preserved from the original implementation: memory
-        is mutated before the commit, so if the commit itself fails and rolls
-        back, the in-memory index and SQLite disagree until the next rebuild.
-        Fixing that means deferring memory mutation until after a successful
-        commit, which is a behavior change and is tracked separately.
+        Ordering is what makes the rollback honest. Memory and the
+        filesystem cannot participate in a SQLite transaction, so touching
+        them before the commit means a rollback leaves all three stores
+        disagreeing - and worse, it deletes files that the index still
+        claims exist. The batch therefore runs in two phases:
+
+            phase 1  plan and delete SQLite rows, inside one transaction
+            commit   the point of no return; on failure roll back and
+                     re-raise, having changed nothing anywhere
+            phase 2  drop the in-memory entries and unlink the files
+
+        A rollback now leaves the corpus exactly as it was. The residual
+        risk moves to phase 2: if unlinking a file fails after the commit,
+        that document is genuinely unindexed and the file is left behind as
+        an orphan, reported in `failed` with the reason. An orphan is
+        recoverable - a rebuild re-indexes it - whereas a deleted file
+        belonging to a rolled-back index entry is not.
         """
 
         requested = normalize_requested_filenames(
@@ -817,6 +940,10 @@ class SearchEngine:
         result = BulkDeleteResult(requested)
 
         connection = self.store.connection()
+
+        # filename, resolved path, terms it contributed, and whether a file
+        # is actually on disk to unlink.
+        planned = []
 
         try:
 
@@ -843,22 +970,25 @@ class SearchEngine:
                         result.not_found.append(filename)
                         continue
 
-                    self.remove_document(
+                    # Read before deleting: the postings are what phase 2
+                    # needs to unwind the in-memory term counts.
+                    old_term_counts = (
+                        self.store.document_term_counts(
+                            filename
+                        )
+                    )
+
+                    self.store.delete_document(
+                        connection,
                         filename,
-                        connection=connection,
-                        commit=False,
                     )
 
-                    if filesystem_exists:
-                        os.remove(file_path)
-
-                    result.deleted.append(filename)
-
-                    log(
-                        "[BULK DELETE] Removed and "
-                        "incrementally unindexed: "
-                        f"{filename}"
-                    )
+                    planned.append((
+                        filename,
+                        file_path,
+                        old_term_counts,
+                        filesystem_exists,
+                    ))
 
                 except Exception as error:
 
@@ -877,6 +1007,41 @@ class SearchEngine:
         finally:
 
             connection.close()
+
+        for (
+            filename,
+            file_path,
+            old_term_counts,
+            filesystem_exists,
+        ) in planned:
+
+            try:
+
+                self.state.remove_document(
+                    filename,
+                    old_term_counts,
+                )
+
+                if filesystem_exists:
+                    os.remove(file_path)
+
+                result.deleted.append(filename)
+
+                log(
+                    "[BULK DELETE] Removed and "
+                    "incrementally unindexed: "
+                    f"{filename}"
+                )
+
+            except Exception as error:
+
+                result.failed.append({
+                    "filename": filename,
+                    "reason": (
+                        "Unindexed, but the stored file "
+                        f"could not be removed: {error}"
+                    ),
+                })
 
         self.mark_ready()
 

@@ -308,7 +308,106 @@ FILENAME_DERIVED_FIELDS = {
 }
 
 
-def compare_search(label, old, new):
+def is_quoted_phrase_query(query):
+    """True when the raw query is wrapped in double quotes."""
+
+    if not isinstance(query, str):
+        return False
+
+    stripped = query.strip()
+
+    return (
+        len(stripped) >= 2
+        and stripped.startswith('"')
+        and stripped.endswith('"')
+    )
+
+
+def classify_shape_delta(label, query, old_payload, new_payload):
+    """
+    Recognise the third manifestation of the filename-word-order fix: a
+    change of response SHAPE, not just of scores.
+
+    The quoted-phrase branch answers with a bare empty list when no document
+    matches the phrase. Whether a document matches is decided by
+    `normalized_phrase in " ".join(filename_words)`, so a permuted word order
+    can make the reference match nothing at all and take the bare-list branch,
+    while the fixed build matches and returns a page object.
+
+    Example from the seed corpus, for the query `"BCS502 Module 2.pdf"`:
+
+        reference   filename_words = ['bcs502', '2', 'module']
+                    joined = 'bcs502 2 module'   -> phrase absent -> []
+        fixed       filename_words = ['bcs502', 'module', '2']
+                    joined = 'bcs502 module 2'   -> phrase present -> page
+
+    The guards are deliberately tight, because this rule is the one place the
+    classifier tolerates a shape change and a shape change is otherwise the
+    loudest kind of regression:
+
+        one side is a bare list and it is exactly empty
+        the other side is a page object with a non-empty result set
+        the raw query is wrapped in double quotes
+        every result on the page side is filename-derived, i.e. it carries
+        both a filename score and a phrase score
+
+    That last guard is what keeps this from excusing a content-search
+    regression: only the filename path can be flipped by word order.
+    """
+
+    if isinstance(old_payload, list):
+        bare, page = old_payload, new_payload
+        direction = "reference answered a bare list, fixed build a page"
+    elif isinstance(new_payload, list):
+        bare, page = new_payload, old_payload
+        direction = "fixed build answered a bare list, reference a page"
+    else:
+        return False
+
+    if not isinstance(page, dict):
+        return False
+
+    if bare != []:
+        return False
+
+    if not is_quoted_phrase_query(query):
+        return False
+
+    results = page.get("results") or []
+
+    if not results:
+        return False
+
+    for item in results:
+
+        if not isinstance(item, dict):
+            return False
+
+        filename_derived = (
+            item.get("filename_score", 0) > 0
+            and item.get("phrase_score", 0) > 0
+        )
+
+        if not filename_derived:
+            return False
+
+    print(f"FILENAME-ORDER DELTA {label} [shape]")
+    print(f"  {direction}; the quoted phrase matches a filename only")
+    print("  when the filename words are in tokenization order.")
+
+    for item in results:
+        print(
+            f"    {item.get('title')}: "
+            f"filename_score={item.get('filename_score')}, "
+            f"phrase_score={item.get('phrase_score')}, "
+            f"score={item.get('score')}, "
+            f"match_type={item.get('match_type')!r}"
+        )
+
+    return True
+
+
+def compare_search(label, old, new, query=None):
     """
     Compare one /api/search check, structurally rather than by query name.
 
@@ -317,14 +416,21 @@ def compare_search(label, old, new):
     reported as a filename-order delta and does not fail. Everything else
     fails.
 
+    `query` is the raw query string, needed only by the shape rule: a
+    quoted phrase whose filename match is flipped by word order changes the
+    RESPONSE SHAPE (bare empty list versus page object), because the
+    bare-list branch fires exactly when no document matched the phrase.
+    See classify_shape_delta for the guards.
+
     Structural classification matters because the pre-fix reference is
     nondeterministic: which of its documents came back with permuted
     filename words depends on the PYTHONHASHSEED of the process that last
     wrote its database. An allowlist of affected query strings therefore
-    changed from run to run and could not be trusted in either direction.
-    Classifying the shape of the difference is stable, and still fails on
-    any delta that touches content scores, snippets, highlights, pages,
-    document membership or pagination.
+    changed from run to run and could not be trusted in either direction -
+    a query that produced a clean diff in one run produced a shape change in
+    the next. Classifying the shape of the difference is stable, and still
+    fails on any delta that touches content scores, snippets, highlights,
+    pages, document membership or pagination.
     """
 
     if old == new:
@@ -338,6 +444,15 @@ def compare_search(label, old, new):
         return 1
 
     if not isinstance(old_payload, dict) or not isinstance(new_payload, dict):
+
+        if classify_shape_delta(
+            label,
+            query,
+            old_payload,
+            new_payload,
+        ):
+            return 0
+
         print(f"MISMATCH {label}: payload shape "
               f"{type(old_payload).__name__} -> {type(new_payload).__name__}")
         print(f"  old: {json.dumps(old_payload, sort_keys=True)[:800]}")
@@ -477,6 +592,7 @@ def main(argv=None):
             f"/api/search?q={query!r}",
             fetch(OLD, "GET", "/api/search", params={"q": query}),
             fetch(NEW, "GET", "/api/search", params={"q": query}),
+            query=query,
         )
 
     for query in BRANCH_QUERIES:
@@ -485,6 +601,7 @@ def main(argv=None):
             f"/api/search?q={query!r} [branch]",
             fetch(OLD, "GET", "/api/search", params={"q": query}),
             fetch(NEW, "GET", "/api/search", params={"q": query}),
+            query=query,
         )
 
     # Guard the quirk itself: if these ever come back as a paginated

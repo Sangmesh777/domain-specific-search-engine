@@ -27,7 +27,7 @@ port testable on day one.
 | Float semantics | Ports **only if** the rounding trap in §4.1 is handled. Otherwise scores diverge silently. |
 | Tokenization | Ports **only if** Unicode categories are reproduced exactly (§4.2). |
 | Filename sanitization | Ports cleanly but must be copied character-for-character (§4.3). |
-| Document text extraction | **Does not port.** PyPDF2 and python-docx have no Android equivalent with identical output. Must be reimplemented and reconciled (§7). |
+| Document text extraction | **Does not port** — PyPDF2 and python-docx have no Android equivalent with identical output. Solved by shipping pre-extracted text (§7); only user-imported documents still need a device parser. |
 | HTTP adapter | Not needed on-device. Replaced by `LocalBackend` (§5). |
 
 The extraction problem is the real one, and it is the reason the golden
@@ -45,7 +45,8 @@ is transport-independent:
 
 ```
 search(query, page, limit)      index_document(name, path)
-delete(name)                    bulk_delete(names)
+delete(name)                    index_extracted(name, text, pages)
+bulk_delete(names)              import_documents(items) / import_paths(paths)
 rebuild()                       status()
 get_document(name)              has_document(name)
 ```
@@ -54,6 +55,11 @@ Nothing in that list mentions HTTP, Flask, requests, or a device. The engine
 takes strings and file paths and returns plain dictionaries. That is what makes
 `LocalBackend` and `RemoteBackend` two adapters over *one* ranking
 implementation instead of two ranking implementations.
+
+`index_extracted` is the one an offline backend actually uses: it takes text
+and page views instead of a path, so a device can index a bundled corpus
+without a PDF parser (§7). `index_document` extracts and then delegates to it,
+so both routes share a single tokenizing and scoring path.
 
 The corollary matters for maintenance: **the Android app must not contain a
 second copy of the ranking rules.** If it does, the two will drift, and the
@@ -72,7 +78,7 @@ exist to prevent that.
 | `storage.py` | SQLite persistence, snapshot loading | Port directly; schema in §6 |
 | `indexing.py` | Building in-memory index structures | Port directly |
 | `rebuild.py` | Re-index from disk | Port directly; ordering rule is now deterministic (§4.5) |
-| `extraction.py` | PDF/DOCX/TXT text extraction | **Replace**; see §7 |
+| `extraction.py` | PDF/DOCX/TXT text extraction | **Not ported for the shipped corpus** — `artifacts/android/corpus_sidecar.json` carries pre-extracted text into `index_extracted`. Needed only for user imports; see §7 |
 | `config.py` | Paths and limits | Port; point at app-private storage (§6) |
 | `engine.py` | Facade tying the above together | Port as the `LocalBackend` implementation |
 
@@ -366,7 +372,82 @@ Recommended, and deliberately conservative:
 4. Show which mode produced the current results. The two modes can legitimately
    hold different corpora, and users must be able to tell.
 
-### 5.5 Keeping the two honest
+### 5.5 The error model
+
+Both backends must fail in the same vocabulary, or the UI ends up with a
+`when` block that branches on transport. The engine already supplies one:
+`search_engine/results.py` returns structured outcomes for expected cases and
+raises only for genuine faults, precisely so that "document is not indexed"
+means the same thing offline and online and only the rendering differs.
+
+The mapping below is not invented — the HTTP column is what `app.py` actually
+does today, in `delete_response` and the bulk routes.
+
+| Engine outcome | HTTP (current) | Domain error |
+| --- | --- | --- |
+| `DELETE_DELETED` | 200 + counts | success |
+| `DELETE_INVALID_PATH` | 400 "Invalid document path." | `InvalidDocument` |
+| `DELETE_NOT_INDEXED` | 404 "Document is not indexed." | `DocumentNotIndexed` |
+| `DELETE_FILE_NOT_FOUND` | 404 "Document file not found." | `DocumentNotFound` |
+| `DELETE_FAILED` | 500 "Could not delete document: …" | `StorageError` |
+| `ImportResult.rejected` | 200, per-document list | `InvalidDocument` |
+| `ImportResult.failed` | 200, per-document list | `IndexingFailed` |
+| `BulkDeleteResult.not_found` | 200, per-document list | `DocumentNotFound` |
+| `BulkDeleteResult.failed` | 200, per-document list | `StorageError` |
+| rebuild raises | 500 | `RebuildFailed` |
+| transport failure | — | `RemoteError` |
+| search raises | 500 | `SearchError` |
+
+Two rules make this hold:
+
+- **Batch operations stay partial.** An upload where one document is unreadable
+  returns 200 with that document in `failed` and the rest committed; a bulk
+  delete behaves the same. Neither backend may turn a per-document failure into
+  a whole-call failure, and the UI must render per-document outcomes.
+- **Expected outcomes are values; faults raise.** A missing document is a value.
+  A database that cannot be written is a fault. Do not collapse the two, or
+  corruption becomes invisible.
+
+**A wrinkle worth knowing about.** `DocumentNotIndexed` and `DocumentNotFound`
+are *both* HTTP 404. `LocalBackend` distinguishes them for free because it has
+the engine's outcome value; `RemoteBackend` cannot, from the status code alone,
+and would have to match on the English message text — which is brittle across
+releases.
+
+The clean fix is an additive machine-readable field on error responses, for
+example `{"error": "Document is not indexed.", "error_code":
+"not_indexed"}`, letting `RemoteBackend` map on `error_code` and leaving
+existing consumers untouched. That is deliberately **not** done here: it
+changes the published HTTP response shape, and the parity tool exists to make
+such changes visible and reviewed rather than incidental. If offline and online
+error handling needs to distinguish the two cases, add the field as its own
+labelled API change, regenerate parity expectations, and update this table.
+Until then, `RemoteBackend` may treat both 404s as one `DocumentNotFound` —
+which is honest, since from a remote client's point of view the difference is
+not actionable.
+
+**A second asymmetry, verified against the running API.** The degenerate name
+`..` is refused differently by the two delete endpoints:
+
+| Request | Status | Body |
+| --- | --- | --- |
+| `DELETE /api/documents/%2E%2E` | 400 | `Invalid document path.` — the engine's containment check |
+| `DELETE /api/documents/..` | 404 | WSGI normalizes the path before routing; the app never sees it |
+| `bulk_delete([".."])` | 200 | `not_found: [".."]` — basename reduces it, then it simply is not there |
+
+All three are safe: the parent of the data folder is never addressable, and no
+test in the suite can make the engine reach outside it. But a port that assumes
+`delete` and `bulkDelete` report the same thing for the same input will be
+wrong. `tests/test_phase12_live.py::test_dot_dot_is_harmless_on_both_delete_endpoints`
+pins all three, and fails if the containment check is removed.
+
+Note also that percent-decoding is transport-dependent: `%2F` in a URL path is
+decoded to a separator that `basename` then strips, so `..%2Fapp.py` becomes an
+ordinary not-indexed lookup, while the same text in a JSON body is never
+decoded and stays a literal (nonexistent) filename. Assuming those behave alike
+is how a traversal hole opens.
+
+### 5.6 Keeping the two honest
 
 Every release should run the golden-vector suite (§9) against **both**
 backends. `RemoteBackend`'s vectors are checked against the live Flask API;
@@ -431,8 +512,35 @@ reboot. The engine wants a real filesystem path — SAF gives a content URI, so
 the backend must copy-then-index. Budget for that copy in both time and disk
 (two copies of every document exist briefly).
 
-WAL mode is fine on app-private storage but produces `-wal` and `-shm` sidecar
-files; include them in any backup or corruption-recovery logic.
+### 6.1 Document identity is the filename, never the path
+
+A search result carries four location-ish fields, and a port must not confuse
+them:
+
+| Field | What it is | Who uses it |
+| --- | --- | --- |
+| `title` / `filename` | The sanitized stored name — the **primary key** | Both modes, for identity |
+| `path` | Absolute filesystem path in the data folder | Offline: to open the local file |
+| `document_url` | Server resource path (`/api/documents/<name>`) | Online: as-is |
+| `page_url`, `open_url` | Same, with a `#page=n` fragment | Online: to deep-link a page |
+
+The engine produces the URLs so both adapters share one result shape: an online
+client uses them directly, an offline client uses `path`.
+
+Identity must be the filename, because `path` is device-local and changes —
+app restore to a different device, a data-directory move, or a scoped-storage
+path that differs per install all rewrite it while the document is unchanged.
+Two consequences for the port:
+
+- Key every cache, selection set, recycler view and "delete these" batch by
+  `filename`. Keying by `path` breaks the moment the app is restored.
+- Never surface a raw `path` in the UI, and never send one to the server. The
+  online API resolves names itself and confines them to the data folder, which
+  is the security boundary; a client-supplied absolute path would either be
+  rejected or, worse, honored.
+
+The stored `path` is derived data. If it is ever wrong, `rebuild()` regenerates
+it from the folder, which is the recovery path rather than a migration.
 
 ---
 
@@ -457,23 +565,51 @@ must reproduce *that contract*, not PyPDF2's internals.
 
 **Recommended approach, in order of decreasing risk-reduction:**
 
-1. **Ship the corpus pre-extracted.** The server (or a build step) extracts text
-   once and distributes a JSON sidecar of `{filename, pages:[{page,text}]}`
-   alongside the documents. The device indexes text, never parses. This makes
-   on-device results identical to server results *by construction* and removes
-   the hardest portability problem entirely. Strongly recommended for a
-   fixed corpus, which is what a VTU notes app has.
+1. **Ship the corpus pre-extracted.** — *implemented.* The device indexes text
+   and never parses, which makes on-device results identical to server results
+   by construction and removes the hardest portability problem entirely. Both
+   halves now exist in this repository:
+
+   - `tools/export_corpus_sidecar.py` generates
+     `artifacts/android/corpus_sidecar.json`: the canonical 13-document corpus
+     as sanitized name, lowercased full text, page views, and an `expected`
+     block of tokenizer outputs for the port to check itself against. Bundle
+     that file in `assets/`.
+   - `SearchEngine.index_extracted(filename, text, pages)` indexes it. This is
+     the engine entry point that takes text instead of a path; `index_document`
+     delegates to it after extracting, so both routes share one tokenizing and
+     scoring path.
+
+   `tests/test_corpus_sidecar.py` proves the claim rather than asserting it:
+   one engine parses the real corpus, another is built purely from the artifact
+   with no extraction library in the loop, and their indexes and their answers
+   to 19 queries must match. Strongly recommended for a fixed corpus, which is
+   what a VTU notes app has.
 2. **Extract on-device for user-added documents only**, using
    `PdfRenderer`-adjacent tooling or a JVM PDF library, and accept that these
    may rank slightly differently from server-extracted equivalents. Label them
-   as locally indexed.
+   as locally indexed. This is the only part of the port that still needs a
+   parser, and it is also the only part where divergence is tolerable.
 3. **Hybrid (recommended):** pre-extracted for the shipped corpus, on-device for
    user imports. The golden vectors cover ranking; extraction gets its own
    smaller contract test comparing device-extracted text against the recorded
    pages for a handful of representative documents.
 
 Do not attempt to make an on-device PDF parser bit-identical to PyPDF2. It is
-not achievable on a schedule, and option 1 makes it unnecessary.
+not achievable on a schedule, and option 1 makes it unnecessary for everything
+the app ships.
+
+**Regenerating the artifact.** It is committed, not built at install time, so
+that an extraction change appears as a reviewed diff instead of a silent
+difference between what the server indexed and what a device holds. After
+changing the corpus generator or upgrading PyPDF2/python-docx:
+
+```bash
+.venv/bin/python tools/export_corpus_sidecar.py
+git diff artifacts/android/corpus_sidecar.json   # review, then commit
+```
+
+`tests/test_corpus_sidecar.py` fails until that is done.
 
 ---
 
@@ -586,7 +722,18 @@ The vectors are transport-independent by construction. A Kotlin test should:
 4. Compare floats with exact equality after the §4.1 rounding. Tolerance
    hides precisely the bug this suite exists to catch.
 
-Run the same file against `RemoteBackend` to keep the two modes honest (§5.5).
+Run the same file against `RemoteBackend` to keep the two modes honest (§5.6).
+
+### The second contract file
+
+`artifacts/android/corpus_sidecar.json` is a different artifact serving a
+different half of the same problem (§7). The vectors prove *ranking* is
+reproducible from recorded index state; the sidecar makes the *shipped corpus*
+indexable without a parser, and its `expected` blocks give a ported tokenizer
+thirteen real documents to check itself against instead of six synthetic ones.
+
+Both are generated, both are committed, and both have a drift gate that fails
+until they are regenerated deliberately.
 
 ---
 
@@ -598,7 +745,7 @@ Run the same file against `RemoteBackend` to keep the two modes honest (§5.5).
 | Rounding divergence (§4.1) | High if written naively | Every score off in the last digit; ranking ties break differently | Exact-binary `toBigDecimal()` + `HALF_EVEN`; golden vectors |
 | Tokenizer Unicode mismatch (§4.2) | Medium | Wrong terms indexed; non-Latin queries fail | Copy categories, not ASCII ranges; vectors |
 | `secure_filename` drift (§4.3) | Medium | Primary keys change; documents collide or vanish | Copy behaviour exactly; test sanitizer first |
-| Reimplementing ranking in Kotlin "temporarily" | Medium | Two implementations that drift forever | §5.5: one vector file, both backends, every release |
+| Reimplementing ranking in Kotlin "temporarily" | Medium | Two implementations that drift forever | §5.6: one vector file, both backends, every release |
 | Tie order differs after rebuild | Medium | Same scores, different result order | Sorted enumeration (§4.5) |
 | O(N) search on a large corpus (§8.1) | Low at target size | Perceptible lag past ~1000 documents | Debounce; measure on a low-end device |
 | SAF copy-then-index doubling storage | Certain | Disk pressure on import | Copy to app storage, delete temp, index incrementally |
@@ -616,22 +763,31 @@ highest-risk items so a failure is discovered while it is still cheap.
    everything else is judged by; build it first.
 2. **`secure_filename` + tokenizer.** Pure functions, no I/O, highest drift
    risk. Validate against the vectors' `corpus` and `index.filename_words`
-   before proceeding.
+   before proceeding, and against the sidecar's `expected` blocks, which give
+   the same check over all 13 real documents rather than six synthetic ones.
 3. **Snapshot loading + `search()`.** Build engine state from the vectors'
    `index` section (skipping extraction entirely) and make all 45 cases pass.
    This proves ranking, rounding and pagination on real expectations.
-4. **SQLite persistence.** Schema from §6, round-trip a snapshot, confirm
-   `filename_words` order survives (§6 caveat).
-5. **`RemoteBackend`.** HTTP client; validate against the same vectors through
+4. **Sidecar loader.** Read `artifacts/android/corpus_sidecar.json` from
+   `assets/`, feed each document to the port of `index_extracted`, and confirm
+   the resulting index matches the artifact's `expected` blocks. After this the
+   shipped corpus is searchable offline with no parser anywhere in the app.
+5. **SQLite persistence.** Schema from §6, round-trip a snapshot, confirm
+   `filename_words` order survives (§6 caveat), and confirm the sidecar-fed
+   index still answers identically after a restart.
+6. **`RemoteBackend`.** HTTP client; validate against the same vectors through
    the live Flask API.
-6. **`SearchBackend` selection + UI wiring.** Explicit mode, no silent fallback,
+7. **`SearchBackend` selection + UI wiring.** Explicit mode, no silent fallback,
    mode shown to the user (§5.4).
-7. **Extraction.** Only now, and only if §7 option 1 (pre-extracted corpus) is
-   rejected.
-8. **On-device benchmarks** (§8.2) on a low-end target device.
+8. **Extraction for user imports only.** The shipped corpus no longer needs it
+   (§7), so this is scoped to documents the user adds through SAF, where
+   divergence from the server is tolerable and can be labelled as locally
+   indexed.
+9. **On-device benchmarks** (§8.2) on a low-end target device.
 
 Steps 1–3 are the ones that decide whether this port works. Everything after
-them is engineering.
+them is engineering. Step 4 is what makes offline mode real for the shipped
+corpus, and it needs no parser.
 
 ---
 
@@ -651,11 +807,15 @@ them is engineering.
 ## Appendix: reproduction
 
 ```bash
-# The regression gate (201 tests: unit, core, live HTTP, parity tool, vectors)
+# The regression gate (235 tests: unit, core, live HTTP including invalid
+# input and access boundaries, parity tool, golden vectors, corpus sidecar)
 ./run_tests.sh
 
 # Regenerate the golden vectors
 .venv/bin/python tools/export_golden_vectors.py
+
+# Regenerate the pre-extracted corpus sidecar for offline Android
+.venv/bin/python tools/export_corpus_sidecar.py
 
 # Core performance benchmarks (no server involved)
 .venv/bin/python tools/benchmark_core.py --documents 1000 --queries 150

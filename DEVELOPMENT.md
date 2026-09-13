@@ -52,15 +52,16 @@ Extra pytest arguments are forwarded:
 
 ## Test suites
 
-201 tests in total.
+235 tests in total.
 
 | Suite | Count | Needs a server? | What it covers |
 | --- | --- | --- | --- |
 | `tests/test_core_units.py` | 94 | no | Individual core modules: tokenizer, filenames, snippets, pagination, storage |
-| `tests/test_search_engine_core.py` | 76 | no | `SearchEngine` public API, determinism, rebuild and delete semantics |
-| `tests/test_parity_tool.py` | 13 | no | The parity tool's own diff classifier, in both directions |
+| `tests/test_search_engine_core.py` | 89 | no | `SearchEngine` public API, determinism, rebuild and delete semantics, adapter boundary |
+| `tests/test_parity_tool.py` | 19 | no | The parity tool's own diff classifier, in both directions |
 | `tests/test_golden_vectors.py` | 9 | no | Drift gate on the published golden vectors |
-| `tests/test_phase12_live.py` | 9 | yes | Public HTTP API behavior end to end |
+| `tests/test_corpus_sidecar.py` | 6 | no | The pre-extracted corpus artifact and the offline indexing path |
+| `tests/test_phase12_live.py` | 18 | yes | Public HTTP API end to end, including invalid input and access boundaries |
 
 The live suite is **skipped**, never silently passed, when no server is
 reachable at `http://127.0.0.1:5000`. Run `./run_tests.sh` so the gate
@@ -95,6 +96,32 @@ git diff tests/golden/search_engine_vectors.json   # review, then commit
 ```
 
 See `ANDROID.md` for how a port consumes them.
+
+## Pre-extracted corpus sidecar
+
+`artifacts/android/corpus_sidecar.json` is the second generated contract, and
+it exists because document extraction is the one part of the engine that cannot
+be ported: PyPDF2 and python-docx have no Android equivalent producing
+identical output, so a device that parsed the corpus itself would rank it
+differently from the server.
+
+```bash
+.venv/bin/python tools/export_corpus_sidecar.py
+git diff artifacts/android/corpus_sidecar.json     # review, then commit
+```
+
+It records the canonical 13-document corpus as sanitized name, lowercased text,
+page views, and an `expected` block of tokenizer outputs, plus the extractor
+versions that produced it. An offline backend indexes it through
+`SearchEngine.index_extracted(filename, text, pages)` — the engine entry point
+that takes text instead of a path, which `index_document` delegates to after
+extracting, so both routes share one tokenizing and scoring path.
+
+`tests/test_corpus_sidecar.py` proves the strategy instead of asserting it: one
+engine parses the real corpus, another is built purely from the artifact with
+no extraction library in the loop, and their indexes and their answers to 19
+queries must match. It also gates drift, determinism, schema, the
+self-validating `expected` block, and survival across a restart.
 
 ## Development corpus
 
@@ -146,7 +173,21 @@ assertion.
 - Ranking stable across `PYTHONHASHSEED` values
 - Rebuild enumerates the corpus in sorted order, so tied scores rank
   deterministically (`61de47a`)
-- Golden vectors cannot drift from the engine unnoticed
+- Same corpus in different directories ranks identically
+- Bulk delete rollback leaves memory, SQLite and the filesystem agreeing
+- Bulk delete orphans a file it cannot unlink rather than losing an indexed
+  document, and a rebuild recovers it
+- Indexing pre-extracted text produces the same index as parsing the file
+- `app.py` stays a thin adapter: no domain imports, no domain calls (AST
+  enforced, in addition to the core-side guard that it never imports a web
+  stack)
+- Golden vectors and the corpus sidecar cannot drift from the engine unnoticed
+- A failed import leaves nothing behind: no orphan file for a new document,
+  and a rejected replacement restores the document it was overwriting
+- Invalid HTTP input is refused with a 4xx and leaves the corpus untouched:
+  malformed JSON, non-array and empty `filenames`, missing upload part
+- No document endpoint can be made to serve anything outside the data folder,
+  including the application's own source
 
 ## Benchmarks
 
@@ -180,5 +221,20 @@ offline Android backend: what ports and what does not, the four portability
 traps that silently change ranking (float rounding, Unicode tokenization,
 filename sanitization, `math.log` precision), the `SearchBackend` /
 `LocalBackend` / `RemoteBackend` design, scoped storage, and the measured
-performance budget above. It deliberately contains no Kotlin — no JDK, Gradle
-or Android SDK is available to compile or test it here.
+performance budget above.
+
+It deliberately contains no Kotlin. There is no JDK, Gradle or Android SDK in
+this environment and no network access to fetch one, so nothing could be
+compiled or tested; unverified source would be a liability rather than a
+deliverable. What is delivered instead is everything that *can* be verified
+here and that a port consumes directly:
+
+| Artifact | Purpose |
+| --- | --- |
+| `tests/golden/search_engine_vectors.json` | 45 search cases with exact expected payloads — the ranking contract |
+| `artifacts/android/corpus_sidecar.json` | Pre-extracted corpus text — indexes offline with no PDF parser |
+| `SearchEngine.index_extracted()` | The engine entry point that sidecar is loaded through |
+| `ANDROID.md` §11 | Risk-ordered build plan, starting with the vector harness |
+
+Both artifacts are generated, committed, and protected by a drift gate, so a
+change to ranking or extraction surfaces as a reviewed diff.

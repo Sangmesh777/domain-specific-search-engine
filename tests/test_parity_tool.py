@@ -85,14 +85,51 @@ def payload(**overrides):
     return base
 
 
-def check(old, new):
+def check(old, new, query=None):
     """Run the classifier the way the tool does: as (status, payload)."""
 
     return compare_search(
         "test",
         (200, old),
         (200, new),
+        query=query,
     )
+
+
+def phrase_payload():
+    """
+    A page object whose every result is filename-derived.
+
+    This is the shape a quoted filename query produces when it matches:
+    both a filename score and a phrase score on every result. It is what
+    the shape rule requires, because only the filename path can be flipped
+    by word order.
+    """
+
+    return payload(results=[
+        {
+            "title": "BCS502_Module_2.pdf",
+            "path": "BCS502_Module_2.pdf",
+            "snippet": "bcs502 computer network technologies module 2",
+            "page": 1,
+            "highlights": [{"start": 0, "end": 6}],
+            "filename_score": 160.0,
+            "content_score": 0.0703,
+            "phrase_score": 130.0,
+            "phrase_occurrences": 0,
+            "exact_content_match": True,
+            "prefix_similarity": 0.0,
+            "numeric_similarity": 0.0,
+            "lexical_match_relevance": 1.0,
+            "score": 1.0,
+            "match_type": "Filename + Phrase",
+            "filetype_filter": "pdf",
+            "tag": "Ranked Result",
+            "document_url": "/api/documents/BCS502_Module_2.pdf",
+            "page_url": "/api/documents/BCS502_Module_2.pdf#page=1",
+            "open_url": "/api/documents/BCS502_Module_2.pdf#page=1",
+        },
+    ])
 
 
 def test_identical_payloads_pass():
@@ -256,6 +293,127 @@ def test_bare_list_payloads_are_never_explainable():
     assert check(payload(), []) == 1
 
     assert check([], payload()) == 1
+
+
+def test_a_quoted_phrase_can_flip_the_response_shape():
+    """
+    The bare-list branch fires exactly when NO document matched the phrase.
+
+    Whether a document matches is decided by substring-testing the phrase
+    against the joined filename words, so a permuted word order can make the
+    reference match nothing and answer [], while the fixed build matches and
+    answers a page object. Same root cause as the score deltas, louder
+    symptom.
+
+    Real case from the seed corpus, query `"BCS502 Module 2.pdf"`:
+    reference filename_words ['bcs502', '2', 'module'] joins to
+    'bcs502 2 module' (phrase absent -> []); fixed ['bcs502', 'module', '2']
+    joins to 'bcs502 module 2' (phrase present -> page).
+    """
+
+    quoted = '"BCS502 Module 2.pdf"'
+
+    assert check([], phrase_payload(), query=quoted) == 0
+
+    # Symmetric: the fix can also REMOVE a false-positive phrase match, so
+    # the fixed build answers [] where the permuted reference answered a
+    # page. Both directions are word-order effects.
+    assert check(phrase_payload(), [], query=quoted) == 0
+
+
+def test_a_shape_change_without_a_quoted_phrase_is_a_regression():
+    """
+    Only the quoted-phrase branch can be flipped by filename word order.
+
+    An unquoted query answering a page object on one side and a bare list on
+    the other is not explainable by the determinism fix, so it must fail.
+    """
+
+    assert check([], phrase_payload(), query="BCS502 Module 2.pdf") == 1
+
+    assert check(phrase_payload(), [], query="BCS502 Module 2.pdf") == 1
+
+
+def test_a_shape_change_with_no_query_context_is_a_regression():
+    """
+    The conservative default: without the query there is no evidence the
+    bare-list branch was reachable, so guess nothing and fail.
+
+    This is why the original bare-list tests still hold - they pass no
+    query.
+    """
+
+    assert check([], phrase_payload()) == 1
+
+    assert check(phrase_payload(), []) == 1
+
+
+def test_a_shape_change_needs_an_empty_bare_list():
+    """
+    The legacy branches only ever answer an empty list. A non-empty bare
+    list on either side is not this situation.
+    """
+
+    quoted = '"BCS502 Module 2.pdf"'
+
+    assert check(
+        ["unexpected"],
+        phrase_payload(),
+        query=quoted,
+    ) == 1
+
+
+def test_a_shape_change_needs_results_on_the_page_side():
+    """
+    [] versus an empty page object is the filetype asymmetry, not a
+    word-order effect, and must not be waved through.
+    """
+
+    quoted = '"BCS502 Module 2.pdf"'
+
+    assert check(
+        [],
+        payload(results=[], pagination={
+            "page": 1,
+            "limit": 10,
+            "total": 0,
+            "total_pages": 0,
+            "has_next": False,
+            "has_previous": False,
+            "start": 0,
+            "end": 0,
+        }),
+        query=quoted,
+    ) == 1
+
+
+def test_a_shape_change_needs_every_result_filename_derived():
+    """
+    The guard that keeps this rule from excusing a content regression.
+
+    If any result on the page side lacks a filename score or a phrase score,
+    the match did not come from the filename path, and word order cannot be
+    the explanation.
+    """
+
+    quoted = '"BCS502 Module 2.pdf"'
+
+    no_phrase = phrase_payload()
+    no_phrase["results"][0]["phrase_score"] = 0.0
+
+    assert check([], no_phrase, query=quoted) == 1
+
+    no_filename = phrase_payload()
+    no_filename["results"][0]["filename_score"] = 0.0
+
+    assert check([], no_filename, query=quoted) == 1
+
+    # One content-only result among filename-derived ones is enough to
+    # disqualify the whole delta.
+    mixed = phrase_payload()
+    mixed["results"] = mixed["results"] + payload()["results"][1:]
+
+    assert check([], mixed, query=quoted) == 1
 
 
 def test_status_code_delta_is_a_regression():

@@ -1,0 +1,340 @@
+{
+  "contract": "Pre-extracted corpus text for the offline Android backend. Index each document with SearchEngine.index_extracted(stored_as, text, pages); do not parse the original files on device. The `expected` block is a parity fixture for the ported tokenizer, not indexing input.",
+  "document_count": 13,
+  "documents": [
+    {
+      "expected": {
+        "distinct_terms": 24,
+        "filename_words": [
+          "bcs502",
+          "module",
+          "1"
+        ],
+        "page_count": 2,
+        "total_words": 28
+      },
+      "extension": "pdf",
+      "pages": [
+        {
+          "page": 1,
+          "text": "bcs502 computer network technologies module 1\nintroduction to network architectures.\nthe osi reference model describes seven layers."
+        },
+        {
+          "page": 2,
+          "text": "physical layer and transmission media.\nguided and unguided media carry network signals."
+        }
+      ],
+      "source_filename": "BCS502 Module 1.pdf",
+      "stored_as": "BCS502_Module_1.pdf",
+      "text": "bcs502 computer network technologies module 1\nintroduction to network architectures.\nthe osi reference model describes seven layers. physical layer and transmission media.\nguided and unguided media carry network signals. ",
+      "title": "BCS502_Module_1.pdf"
+    },
+    {
+      "expected": {
+        "distinct_terms": 43,
+        "filename_words": [
+          "bcs502",
+          "module",
+          "2"
+        ],
+        "page_count": 3,
+        "total_words": 60
+      },
+      "extension": "pdf",
+      "pages": [
+        {
+          "page": 1,
+          "text": "bcs502 computer network technologies module 2\nnetwork layer design and routing.\nthe network layer forwards packets across an internet network."
+        },
+        {
+          "page": 2,
+          "text": "routing protocols and congestion control.\ndistance vector routing and link state routing are compared in this module.\ninternal reference code 999 applies to the network laboratory assignment."
+        },
+        {
+          "page": 3,
+          "text": "transport layer overview.\ntcp and udp provide end to end network communication for applications."
+        }
+      ],
+      "source_filename": "BCS502 Module 2.pdf",
+      "stored_as": "BCS502_Module_2.pdf",
+      "text": "bcs502 computer network technologies module 2\nnetwork layer design and routing.\nthe network layer forwards packets across an internet network. routing protocols and congestion control.\ndistance vector routing and link state routing are compared in this module.\ninternal reference code 999 applies to the network laboratory assignment. transport layer overview.\ntcp and udp provide end to end network communication for applications. ",
+      "title": "BCS502_Module_2.pdf"
+    },
+    {
+      "expected": {
+        "distinct_terms": 22,
+        "filename_words": [
+          "bcs502",
+          "module",
+          "3"
+        ],
+        "page_count": 2,
+        "total_words": 25
+      },
+      "extension": "pdf",
+      "pages": [
+        {
+          "page": 1,
+          "text": "bcs502 computer network technologies module 3\napplication layer protocols.\ndns http smtp and ftp are network applications."
+        },
+        {
+          "page": 2,
+          "text": "network security fundamentals.\nencryption protects data crossing a public network."
+        }
+      ],
+      "source_filename": "BCS502 Module 3.pdf",
+      "stored_as": "BCS502_Module_3.pdf",
+      "text": "bcs502 computer network technologies module 3\napplication layer protocols.\ndns http smtp and ftp are network applications. network security fundamentals.\nencryption protects data crossing a public network. ",
+      "title": "BCS502_Module_3.pdf"
+    },
+    {
+      "expected": {
+        "distinct_terms": 23,
+        "filename_words": [
+          "cloud",
+          "computing",
+          "basics"
+        ],
+        "page_count": 1,
+        "total_words": 23
+      },
+      "extension": "docx",
+      "pages": [
+        {
+          "page": 1,
+          "text": "cloud computing basics\ninfrastructure platform and software are service models.\nvirtualization isolates workloads on shared hardware.\nelasticity allows capacity to grow with demand."
+        }
+      ],
+      "source_filename": "Cloud Computing Basics.docx",
+      "stored_as": "Cloud_Computing_Basics.docx",
+      "text": "cloud computing basics infrastructure platform and software are service models. virtualization isolates workloads on shared hardware. elasticity allows capacity to grow with demand. ",
+      "title": "Cloud_Computing_Basics.docx"
+    },
+    {
+      "expected": {
+        "distinct_terms": 19,
+        "filename_words": [
+          "computer",
+          "network",
+          "technologies"
+        ],
+        "page_count": 1,
+        "total_words": 23
+      },
+      "extension": "docx",
+      "pages": [
+        {
+          "page": 1,
+          "text": "computer network technologies\na network is a set of interconnected devices.\nswitching and routing move data across the network.\nbandwidth and latency describe network performance."
+        }
+      ],
+      "source_filename": "Computer Network Technologies.docx",
+      "stored_as": "Computer_Network_Technologies.docx",
+      "text": "computer network technologies a network is a set of interconnected devices. switching and routing move data across the network. bandwidth and latency describe network performance. ",
+      "title": "Computer_Network_Technologies.docx"
+    },
+    {
+      "expected": {
+        "distinct_terms": 21,
+        "filename_words": [
+          "cyber",
+          "security",
+          "fundamentals"
+        ],
+        "page_count": 1,
+        "total_words": 21
+      },
+      "extension": "txt",
+      "pages": [
+        {
+          "page": 1,
+          "text": "cyber security fundamentals\nconfidentiality integrity and availability form the triad.\nthreat actors exploit software vulnerabilities.\ndefense in depth layers multiple controls.\n"
+        }
+      ],
+      "source_filename": "Cyber Security Fundamentals.txt",
+      "stored_as": "Cyber_Security_Fundamentals.txt",
+      "text": "cyber security fundamentals\nconfidentiality integrity and availability form the triad.\nthreat actors exploit software vulnerabilities.\ndefense in depth layers multiple controls.\n",
+      "title": "Cyber_Security_Fundamentals.txt"
+    },
+    {
+      "expected": {
+        "distinct_terms": 23,
+        "filename_words": [
+          "dbms",
+          "unit",
+          "4",
+          "notes"
+        ],
+        "page_count": 1,
+        "total_words": 23
+      },
+      "extension": "txt",
+      "pages": [
+        {
+          "page": 1,
+          "text": "dbms unit 4 notes\nnormalization removes redundancy from relations.\nfirst second and third normal form are progressive rules.\ntransactions provide atomicity consistency isolation durability.\n"
+        }
+      ],
+      "source_filename": "DBMS Unit 4 Notes.txt",
+      "stored_as": "DBMS_Unit_4_Notes.txt",
+      "text": "dbms unit 4 notes\nnormalization removes redundancy from relations.\nfirst second and third normal form are progressive rules.\ntransactions provide atomicity consistency isolation durability.\n",
+      "title": "DBMS_Unit_4_Notes.txt"
+    },
+    {
+      "expected": {
+        "distinct_terms": 20,
+        "filename_words": [
+          "data",
+          "structures",
+          "and",
+          "algorithms"
+        ],
+        "page_count": 1,
+        "total_words": 26
+      },
+      "extension": "docx",
+      "pages": [
+        {
+          "page": 1,
+          "text": "data structures and algorithms\narrays lists stacks and queues are linear structures.\ntrees and graphs are non linear structures.\nalgorithm complexity is expressed using big o notation."
+        }
+      ],
+      "source_filename": "Data Structures and Algorithms.docx",
+      "stored_as": "Data_Structures_and_Algorithms.docx",
+      "text": "data structures and algorithms arrays lists stacks and queues are linear structures. trees and graphs are non linear structures. algorithm complexity is expressed using big o notation. ",
+      "title": "Data_Structures_and_Algorithms.docx"
+    },
+    {
+      "expected": {
+        "distinct_terms": 27,
+        "filename_words": [
+          "machine",
+          "learning",
+          "introduction"
+        ],
+        "page_count": 2,
+        "total_words": 30
+      },
+      "extension": "pdf",
+      "pages": [
+        {
+          "page": 1,
+          "text": "machine learning introduction\nsupervised learning trains a model on labelled data.\nfeature vectors describe every training example."
+        },
+        {
+          "page": 2,
+          "text": "model evaluation.\nprecision recall and accuracy measure classifier quality on a held out validation set."
+        }
+      ],
+      "source_filename": "Machine Learning Introduction.pdf",
+      "stored_as": "Machine_Learning_Introduction.pdf",
+      "text": "machine learning introduction\nsupervised learning trains a model on labelled data.\nfeature vectors describe every training example. model evaluation.\nprecision recall and accuracy measure classifier quality on a held out validation set. ",
+      "title": "Machine_Learning_Introduction.pdf"
+    },
+    {
+      "expected": {
+        "distinct_terms": 22,
+        "filename_words": [
+          "network",
+          "security",
+          "notes"
+        ],
+        "page_count": 2,
+        "total_words": 25
+      },
+      "extension": "pdf",
+      "pages": [
+        {
+          "page": 1,
+          "text": "network security notes\nfirewalls filter network traffic between zones.\nintrusion detection monitors the network."
+        },
+        {
+          "page": 2,
+          "text": "cryptographic primitives.\nsymmetric and asymmetric keys secure a network session against eavesdropping."
+        }
+      ],
+      "source_filename": "Network Security Notes.pdf",
+      "stored_as": "Network_Security_Notes.pdf",
+      "text": "network security notes\nfirewalls filter network traffic between zones.\nintrusion detection monitors the network. cryptographic primitives.\nsymmetric and asymmetric keys secure a network session against eavesdropping. ",
+      "title": "Network_Security_Notes.pdf"
+    },
+    {
+      "expected": {
+        "distinct_terms": 19,
+        "filename_words": [
+          "operating",
+          "systems",
+          "summary"
+        ],
+        "page_count": 1,
+        "total_words": 22
+      },
+      "extension": "docx",
+      "pages": [
+        {
+          "page": 1,
+          "text": "operating systems summary\nprocess scheduling decides which process runs next.\nvirtual memory pages physical memory on demand.\nfile systems organize persistent storage."
+        }
+      ],
+      "source_filename": "Operating Systems Summary.docx",
+      "stored_as": "Operating_Systems_Summary.docx",
+      "text": "operating systems summary process scheduling decides which process runs next. virtual memory pages physical memory on demand. file systems organize persistent storage. ",
+      "title": "Operating_Systems_Summary.docx"
+    },
+    {
+      "expected": {
+        "distinct_terms": 23,
+        "filename_words": [
+          "software",
+          "engineering",
+          "lecture",
+          "notes"
+        ],
+        "page_count": 1,
+        "total_words": 25
+      },
+      "extension": "txt",
+      "pages": [
+        {
+          "page": 1,
+          "text": "software engineering lecture notes\nthe waterfall model completes each phase before the next.\nagile methods deliver software in short iterations.\ntesting verifies behavior against requirements.\n"
+        }
+      ],
+      "source_filename": "Software Engineering Lecture Notes.txt",
+      "stored_as": "Software_Engineering_Lecture_Notes.txt",
+      "text": "software engineering lecture notes\nthe waterfall model completes each phase before the next.\nagile methods deliver software in short iterations.\ntesting verifies behavior against requirements.\n",
+      "title": "Software_Engineering_Lecture_Notes.txt"
+    },
+    {
+      "expected": {
+        "distinct_terms": 14,
+        "filename_words": [
+          "web",
+          "technologies",
+          "reference"
+        ],
+        "page_count": 1,
+        "total_words": 16
+      },
+      "extension": "txt",
+      "pages": [
+        {
+          "page": 1,
+          "text": "web technologies reference\nhtml describes document structure.\ncss describes presentation.\njavascript describes behavior in the browser.\n"
+        }
+      ],
+      "source_filename": "Web Technologies Reference.txt",
+      "stored_as": "Web_Technologies_Reference.txt",
+      "text": "web technologies reference\nhtml describes document structure.\ncss describes presentation.\njavascript describes behavior in the browser.\n",
+      "title": "Web_Technologies_Reference.txt"
+    }
+  ],
+  "extraction": {
+    "pypdf2": "3.0.1",
+    "python": "3.11.2",
+    "python_docx": "1.2.0"
+  },
+  "generator": "tools/export_corpus_sidecar.py",
+  "schema_version": 1,
+  "skipped": []
+}
