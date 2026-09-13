@@ -65,6 +65,17 @@ from search_engine.rebuild import (
     build_snapshot_from_folder,
 )
 
+from search_engine.results import (
+    DELETE_DELETED,
+    DELETE_FAILED,
+    DELETE_FILE_NOT_FOUND,
+    DELETE_INVALID_PATH,
+    DELETE_NOT_INDEXED,
+    BulkDeleteResult,
+    DeleteResult,
+    ImportResult,
+)
+
 from search_engine.snippets import (
     build_snippet_result,
     count_phrase_occurrences,
@@ -93,6 +104,11 @@ from search_engine.tokenizer import (
 
 
 __all__ = [
+    "DELETE_DELETED",
+    "DELETE_FAILED",
+    "DELETE_FILE_NOT_FOUND",
+    "DELETE_INVALID_PATH",
+    "DELETE_NOT_INDEXED",
     "ERROR",
     "FILETYPE_EXTENSIONS",
     "FILETYPE_FILTER_TOKENS",
@@ -100,7 +116,10 @@ __all__ = [
     "READY",
     "SQLITE_SCHEMA",
     "SUPPORTED_EXTENSIONS",
+    "BulkDeleteResult",
+    "DeleteResult",
     "EngineConfig",
+    "ImportResult",
     "IndexSnapshot",
     "IndexState",
     "IndexStatusTracker",

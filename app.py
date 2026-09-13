@@ -35,7 +35,7 @@ from search_engine.engine import (
     SearchEngine,
 )
 from search_engine.filenames import (
-    sanitize_upload_filename,
+    normalize_requested_filenames,
 )
 from search_engine.pagination import (
     empty_query_response,
@@ -44,6 +44,12 @@ from search_engine.pagination import (
 from search_engine.query import (
     normalize_search_query,
     parse_filetype_filter,
+)
+from search_engine.results import (
+    DELETE_FAILED,
+    DELETE_FILE_NOT_FOUND,
+    DELETE_INVALID_PATH,
+    DELETE_NOT_INDEXED,
 )
 from search_engine.snippets import (
     count_phrase_occurrences,
@@ -263,8 +269,11 @@ print(
 )
 def upload_file():
     """
-    Bulk upload with document-local extraction/indexing and ONE SQLite
-    transaction for the whole request.
+    Bulk upload with ONE SQLite transaction for the whole request.
+
+    This route parses multipart and serializes JSON; storing, extracting,
+    indexing, committing and status bookkeeping belong to the engine, which
+    is the same code an offline Android import runs.
     """
 
     files = request.files.getlist("file")
@@ -274,141 +283,36 @@ def upload_file():
             "error": "No files found"
         }), 400
 
-    uploaded_names = []
-    created_names = []
-    replaced_names = []
-    rejected_files = []
-    failed_files = []
-
-    connection = ENGINE.store.connection()
-
-    try:
-        for file in files:
-
-            original_filename = (
-                file.filename or ""
-            ).strip()
-
-            safe_filename = (
-                sanitize_upload_filename(
-                    original_filename
-                )
+    result = ENGINE.import_documents(
+        (
+            (
+                file.filename,
+                file.stream,
             )
-
-            if not safe_filename:
-
-                rejected_files.append({
-                    "filename": original_filename,
-                    "reason": (
-                        "Unsupported or invalid filename. "
-                        "Allowed: PDF, DOCX, TXT."
-                    ),
-                })
-
-                continue
-
-            file_path = os.path.join(
-                DATA_FOLDER,
-                safe_filename,
-            )
-
-            existed_before = os.path.isfile(
-                file_path
-            )
-
-            temp_path = file_path + ".uploading"
-
-            try:
-
-                file.save(temp_path)
-
-                os.replace(
-                    temp_path,
-                    file_path,
-                )
-
-                ENGINE.index_document(
-                    safe_filename,
-                    file_path,
-                    connection=connection,
-                    commit=False,
-                )
-
-                uploaded_names.append(
-                    safe_filename
-                )
-
-                if existed_before:
-
-                    replaced_names.append(
-                        safe_filename
-                    )
-
-                    print(
-                        "[UPLOAD] Replaced and "
-                        "incrementally indexed: "
-                        f"{safe_filename}"
-                    )
-
-                else:
-
-                    created_names.append(
-                        safe_filename
-                    )
-
-                    print(
-                        "[UPLOAD] Created and "
-                        "incrementally indexed: "
-                        f"{safe_filename}"
-                    )
-
-            except Exception as error:
-
-                if os.path.exists(temp_path):
-                    try:
-                        os.remove(temp_path)
-                    except OSError:
-                        pass
-
-                failed_files.append({
-                    "filename": safe_filename,
-                    "reason":
-                        f"Could not index file: {error}",
-                })
-
-        connection.commit()
-
-    except Exception:
-
-        connection.rollback()
-        raise
-
-    finally:
-
-        connection.close()
-
-    ENGINE.mark_ready()
+            for file in files
+        )
+    )
 
     counts = ENGINE.counts()
 
     return jsonify({
         "message": (
-            f"Processed {len(uploaded_names)} "
+            f"Processed {result.uploaded_count} "
             f"file"
-            f"{'s' if len(uploaded_names) != 1 else ''}: "
-            f"{len(created_names)} created, "
-            f"{len(replaced_names)} replaced."
+            f"{'s' if result.uploaded_count != 1 else ''}: "
+            f"{result.created_count} created, "
+            f"{result.replaced_count} replaced."
         ),
-        "uploaded": uploaded_names,
-        "created": created_names,
-        "replaced": replaced_names,
-        "rejected": rejected_files,
-        "failed": failed_files,
-        "uploaded_count": len(uploaded_names),
-        "created_count": len(created_names),
-        "replaced_count": len(replaced_names),
-        "rejected_count": len(rejected_files),
-        "failed_count": len(failed_files),
+        "uploaded": result.uploaded,
+        "created": result.created,
+        "replaced": result.replaced,
+        "rejected": result.rejected,
+        "failed": result.failed,
+        "uploaded_count": result.uploaded_count,
+        "created_count": result.created_count,
+        "replaced_count": result.replaced_count,
+        "rejected_count": result.rejected_count,
+        "failed_count": result.failed_count,
         "indexing_started": False,
         "indexing": ENGINE.index_status(),
         "documents": counts["documents"],
@@ -1823,34 +1727,58 @@ def execute_search():
     )
 
 
-def resolve_document_path(filename):
+def delete_response(result):
     """
-    Resolve an indexed document to a real path inside DATA_FOLDER.
+    Render a core DeleteResult as HTTP.
 
-    Prevents GET/DELETE document paths from escaping DATA_FOLDER.
+    The outcome vocabulary lives in the engine so the offline Android
+    backend can present the same four cases; only this mapping is HTTP.
     """
 
-    if not filename:
-        return None
+    if result.outcome == DELETE_INVALID_PATH:
+        return jsonify({
+            "error":
+                "Invalid document path."
+        }), 400
 
-    data_root = os.path.realpath(DATA_FOLDER)
+    if result.outcome == DELETE_NOT_INDEXED:
+        return jsonify({
+            "error":
+                "Document is not indexed."
+        }), 404
 
-    requested_path = os.path.realpath(
-        os.path.join(
-            DATA_FOLDER,
-            os.path.basename(filename)
-        )
-    )
+    if result.outcome == DELETE_FILE_NOT_FOUND:
+        return jsonify({
+            "error":
+                "Document file not found."
+        }), 404
 
-    try:
-        if os.path.commonpath(
-            [data_root, requested_path]
-        ) != data_root:
-            return None
-    except ValueError:
-        return None
+    if result.outcome == DELETE_FAILED:
+        return jsonify({
+            "error":
+                f"Could not delete document: {result.reason}"
+        }), 500
 
-    return requested_path
+    counts = ENGINE.counts()
+
+    return jsonify({
+        "message":
+            f"Deleted {result.filename} successfully.",
+        "deleted":
+            result.filename,
+        "documents":
+            counts["documents"],
+        "content_terms":
+            counts["content_terms"],
+        "filenames_indexed":
+            counts["filenames_indexed"],
+        "page_text_entries":
+            counts["page_text_entries"],
+        "indexing_started":
+            False,
+        "indexing":
+            ENGINE.index_status(),
+    }), 200
 
 
 # ============================================================
@@ -1862,8 +1790,22 @@ def resolve_document_path(filename):
     methods=["GET", "DELETE"]
 )
 def open_document(filename):
+    """
+    Serve one document, or delete it.
 
-    safe_path = resolve_document_path(
+    Deletion is a single engine operation covering the stored file, the
+    in-memory index and the SQLite rows, so the offline Android backend
+    deletes through exactly the same code path. Path confinement to the data
+    folder is enforced by the engine for both verbs.
+    """
+
+    if request.method == "DELETE":
+
+        return delete_response(
+            ENGINE.delete(filename)
+        )
+
+    safe_path = ENGINE.resolve_document_path(
         filename
     )
 
@@ -1883,62 +1825,6 @@ def open_document(filename):
                 "Document is not indexed."
         }), 404
 
-    if request.method == "DELETE":
-
-        if not os.path.isfile(
-            safe_path
-        ):
-            return jsonify({
-                "error":
-                    "Document file not found."
-            }), 404
-
-        try:
-
-            os.remove(
-                safe_path
-            )
-
-            ENGINE.remove_document(
-                safe_filename
-            )
-
-        except Exception as error:
-
-            return jsonify({
-                "error":
-                    f"Could not delete document: {error}"
-            }), 500
-
-        ENGINE.mark_ready()
-
-        print(
-            "[DELETE] Removed and "
-            "incrementally unindexed: "
-            f"{safe_filename}"
-        )
-
-        counts = ENGINE.counts()
-
-        return jsonify({
-            "message":
-                f"Deleted {safe_filename} successfully.",
-            "deleted":
-                safe_filename,
-            "documents":
-                counts["documents"],
-            "content_terms":
-                counts["content_terms"],
-            "filenames_indexed":
-                counts["filenames_indexed"],
-            "page_text_entries":
-                counts["page_text_entries"],
-            "indexing_started":
-                False,
-            "indexing":
-                ENGINE.index_status(),
-        }), 200
-
     return send_from_directory(
         DATA_FOLDER,
         safe_filename,
@@ -1956,6 +1842,9 @@ def bulk_delete_documents():
 
     JSON body:
         {"filenames": ["one.txt", "two.pdf"]}
+
+    Request validation happens here; the transaction, the per-document
+    accounting and the filesystem removal belong to the engine.
     """
 
     payload = request.get_json(
@@ -1975,118 +1864,31 @@ def bulk_delete_documents():
                 "'filenames' must be a JSON array."
         }), 400
 
-    normalized_filenames = []
+    # Normalize before touching the engine so an empty or invalid request
+    # cannot bump the indexing generation the way a real batch does.
+    requested = normalize_requested_filenames(
+        filenames
+    )
 
-    for filename in filenames:
-
-        if not isinstance(
-            filename,
-            str
-        ):
-            continue
-
-        safe_filename = os.path.basename(
-            filename.strip()
-        )
-
-        if (
-            safe_filename
-            and safe_filename not in normalized_filenames
-        ):
-            normalized_filenames.append(
-                safe_filename
-            )
-
-    if not normalized_filenames:
+    if not requested:
         return jsonify({
             "error":
                 "No valid filenames supplied."
         }), 400
 
-    deleted = []
-    not_found = []
-    failed = []
-
-    connection = ENGINE.store.connection()
-
-    try:
-
-        for filename in normalized_filenames:
-
-            file_path = os.path.join(
-                DATA_FOLDER,
-                filename
-            )
-
-            try:
-
-                indexed_exists = ENGINE.has_document(
-                    filename
-                )
-
-                filesystem_exists = os.path.isfile(
-                    file_path
-                )
-
-                if (
-                    not indexed_exists
-                    and not filesystem_exists
-                ):
-                    not_found.append(
-                        filename
-                    )
-                    continue
-
-                ENGINE.remove_document(
-                    filename,
-                    connection=connection,
-                    commit=False,
-                )
-
-                if filesystem_exists:
-                    os.remove(file_path)
-
-                deleted.append(
-                    filename
-                )
-
-                print(
-                    "[BULK DELETE] Removed and "
-                    "incrementally unindexed: "
-                    f"{filename}"
-                )
-
-            except Exception as error:
-
-                failed.append({
-                    "filename": filename,
-                    "reason": str(error),
-                })
-
-        connection.commit()
-
-    except Exception:
-
-        connection.rollback()
-        raise
-
-    finally:
-
-        connection.close()
-
-    ENGINE.mark_ready()
+    result = ENGINE.bulk_delete(requested)
 
     counts = ENGINE.counts()
 
     return jsonify({
         "message":
-            f"Bulk delete complete: {len(deleted)} deleted.",
-        "deleted": deleted,
-        "not_found": not_found,
-        "failed": failed,
-        "deleted_count": len(deleted),
-        "not_found_count": len(not_found),
-        "failed_count": len(failed),
+            f"Bulk delete complete: {result.deleted_count} deleted.",
+        "deleted": result.deleted,
+        "not_found": result.not_found,
+        "failed": result.failed,
+        "deleted_count": result.deleted_count,
+        "not_found_count": result.not_found_count,
+        "failed_count": result.failed_count,
         "indexing_started": False,
         "indexing": ENGINE.index_status(),
         "documents": counts["documents"],

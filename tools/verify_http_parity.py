@@ -33,7 +33,7 @@ Exit code is 0 when every check matches, 1 otherwise.
 import argparse
 import hashlib
 import json
-import sys
+import os
 
 import requests
 
@@ -105,6 +105,45 @@ DOCUMENTS = [
 ]
 
 
+def normalize(payload):
+    """
+    Rewrite deployment-specific values so two hosts can be compared.
+
+    Exactly three things legitimately differ between two servers running
+    the same code on the same corpus, and all three are absolute filesystem
+    locations:
+
+        "path"        a document's absolute path inside the data folder
+        "data_folder" the data folder itself, reported by /api/status
+        "indexing"    wall-clock timestamps and the generation counter
+
+    Everything else — ranking order, scores, snippets, highlight offsets,
+    pagination, match types, tags — is behavior, and is compared exactly.
+    Normalizing only these keys is what lets the diff stay meaningful after
+    a rebuild rewrites stored paths.
+    """
+
+    if isinstance(payload, dict):
+
+        normalized = {}
+
+        for key, value in payload.items():
+
+            if key == "path" and isinstance(value, str):
+                normalized[key] = os.path.basename(value)
+            elif key in ("data_folder", "indexing"):
+                normalized[key] = "<normalized>"
+            else:
+                normalized[key] = normalize(value)
+
+        return normalized
+
+    if isinstance(payload, list):
+        return [normalize(item) for item in payload]
+
+    return payload
+
+
 def fetch(base, method, path, **kwargs):
     response = requests.request(
         method,
@@ -113,7 +152,7 @@ def fetch(base, method, path, **kwargs):
         **kwargs,
     )
 
-    return response.status_code, response.json()
+    return response.status_code, normalize(response.json())
 
 
 def compare(label, old, new):
@@ -156,37 +195,25 @@ def main(argv=None):
     failures = 0
     checks = 0
 
-    # data_folder is deployment-specific and indexing carries wall-clock
-    # timestamps, so both are normalized away; the corpus counters are the
-    # actual contract.
-    def comparable_status(payload):
-        status_code, body = payload
-
-        body = dict(body)
-        body.pop("data_folder", None)
-        body.pop("indexing", None)
-
-        return status_code, body
+    # normalize() already reduces data_folder and the indexing timestamps,
+    # so the corpus counters and the indexing state are compared directly.
+    checks += 1
+    failures += compare(
+        "/api/status",
+        fetch(OLD, "GET", "/api/status"),
+        fetch(NEW, "GET", "/api/status"),
+    )
 
     checks += 1
     failures += compare(
-        "/api/status (corpus counters)",
-        comparable_status(fetch(OLD, "GET", "/api/status")),
-        comparable_status(fetch(NEW, "GET", "/api/status")),
+        "indexing state",
+        requests.get(
+            f"{OLD}/api/status", timeout=30
+        ).json()["indexing"]["state"],
+        requests.get(
+            f"{NEW}/api/status", timeout=30
+        ).json()["indexing"]["state"],
     )
-
-    for old_state, new_state in (
-        (
-            fetch(OLD, "GET", "/api/status")[1]["indexing"]["state"],
-            fetch(NEW, "GET", "/api/status")[1]["indexing"]["state"],
-        ),
-    ):
-        checks += 1
-        failures += compare(
-            "indexing state",
-            old_state,
-            new_state,
-        )
 
     for query in QUERIES:
         checks += 1

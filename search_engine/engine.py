@@ -33,6 +33,7 @@ connection. That is what makes bulk upload and bulk delete atomic.
 """
 
 import os
+import shutil
 import time
 
 from search_engine.config import (
@@ -43,12 +44,26 @@ from search_engine.extraction import (
     extract_pages,
     extract_text,
 )
+from search_engine.filenames import (
+    normalize_requested_filenames,
+    sanitize_upload_filename,
+)
 from search_engine.index import (
     IndexState,
 )
 from search_engine.rebuild import (
     REBUILD_BANNER,
     build_snapshot_from_folder,
+)
+from search_engine.results import (
+    DELETE_DELETED,
+    DELETE_FAILED,
+    DELETE_FILE_NOT_FOUND,
+    DELETE_INVALID_PATH,
+    DELETE_NOT_INDEXED,
+    BulkDeleteResult,
+    DeleteResult,
+    ImportResult,
 )
 from search_engine.status import (
     IndexStatusTracker,
@@ -62,6 +77,31 @@ from search_engine.tokenizer import (
     tokenize,
     tokenize_filename,
 )
+
+
+# Werkzeug writes an upload with shutil.copyfileobj at 16 KiB. The engine uses
+# the same copy and the same buffer size, so stored bytes are identical whether
+# the stream arrived in an HTTP multipart body or from an Android content
+# resolver.
+_STREAM_BUFFER_SIZE = 16384
+
+
+def _write_stream_to_path(stream, path):
+    """
+    Copy a binary stream to a path.
+
+    The caller owns the stream, so it is not closed here: the Flask adapter
+    passes FileStorage.stream and closes it with the request, while
+    import_paths opens and closes its own handles.
+    """
+
+    with open(path, "wb") as destination:
+
+        shutil.copyfileobj(
+            stream,
+            destination,
+            _STREAM_BUFFER_SIZE,
+        )
 
 
 class SearchEngine:
@@ -396,6 +436,366 @@ class SearchEngine:
         finally:
             if own_connection:
                 connection.close()
+
+    # --------------------------------------------------------
+    # IMPORT
+    # --------------------------------------------------------
+
+    def import_documents(
+        self,
+        items,
+        log=print,
+    ):
+        """
+        Import a batch of documents in ONE SQLite transaction.
+
+        `items` is an iterable of (original_filename, binary stream) pairs.
+        A stream is anything with `read()`, so the Flask adapter hands over
+        `FileStorage.stream` and an offline Android backend hands over a
+        ContentResolver stream; neither knows about the other, and neither
+        needs a network.
+
+        Per document:
+
+        1. sanitize the name (rejecting unsupported/unsafe names)
+        2. write the bytes to `<name>.uploading`, then atomically rename
+        3. index it into memory and into the shared transaction
+
+        A document that cannot be extracted or indexed is recorded as a
+        failure and its temporary file is removed, but the rest of the batch
+        still commits: one bad upload must not discard nine good ones. The
+        transaction is rolled back only if the batch itself fails.
+
+        Returns an ImportResult.
+        """
+
+        result = ImportResult()
+
+        connection = self.store.connection()
+
+        try:
+            for original_filename, stream in items:
+
+                original_filename = (
+                    original_filename or ""
+                ).strip()
+
+                safe_filename = sanitize_upload_filename(
+                    original_filename
+                )
+
+                if not safe_filename:
+
+                    result.rejected.append({
+                        "filename": original_filename,
+                        "reason": (
+                            "Unsupported or invalid filename. "
+                            "Allowed: PDF, DOCX, TXT."
+                        ),
+                    })
+
+                    continue
+
+                file_path = self.config.document_path(
+                    safe_filename
+                )
+
+                existed_before = os.path.isfile(
+                    file_path
+                )
+
+                temp_path = file_path + ".uploading"
+
+                try:
+
+                    _write_stream_to_path(
+                        stream,
+                        temp_path,
+                    )
+
+                    os.replace(
+                        temp_path,
+                        file_path,
+                    )
+
+                    self.index_document(
+                        safe_filename,
+                        file_path,
+                        connection=connection,
+                        commit=False,
+                    )
+
+                    result.uploaded.append(
+                        safe_filename
+                    )
+
+                    if existed_before:
+
+                        result.replaced.append(
+                            safe_filename
+                        )
+
+                        log(
+                            "[UPLOAD] Replaced and "
+                            "incrementally indexed: "
+                            f"{safe_filename}"
+                        )
+
+                    else:
+
+                        result.created.append(
+                            safe_filename
+                        )
+
+                        log(
+                            "[UPLOAD] Created and "
+                            "incrementally indexed: "
+                            f"{safe_filename}"
+                        )
+
+                except Exception as error:
+
+                    if os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except OSError:
+                            pass
+
+                    result.failed.append({
+                        "filename": safe_filename,
+                        "reason":
+                            f"Could not index file: {error}",
+                    })
+
+            connection.commit()
+
+        except Exception:
+
+            connection.rollback()
+            raise
+
+        finally:
+
+            connection.close()
+
+        self.mark_ready()
+
+        return result
+
+    def import_paths(
+        self,
+        paths,
+        log=print,
+    ):
+        """
+        Import documents that already exist as files on disk.
+
+        Convenience for callers that have paths rather than streams: an
+        Android import flow that has already copied through the content
+        resolver, or a bulk migration script pointed at a folder. All files
+        are opened up front and closed by this method, and the whole batch
+        still shares one transaction.
+        """
+
+        handles = []
+
+        items = []
+
+        try:
+
+            for path in paths:
+
+                handle = open(path, "rb")
+
+                handles.append(handle)
+
+                items.append((
+                    os.path.basename(path),
+                    handle,
+                ))
+
+            return self.import_documents(
+                items,
+                log=log,
+            )
+
+        finally:
+
+            for handle in handles:
+                handle.close()
+
+    # --------------------------------------------------------
+    # DELETE
+    # --------------------------------------------------------
+
+    def delete(self, filename, log=print):
+        """
+        Delete one document: file, memory index and SQLite rows.
+
+        Returns a DeleteResult whose outcome is one of:
+
+            deleted          file removed and document unindexed
+            invalid_path     name would escape the data folder
+            not_indexed      no such document in the index
+            file_not_found   indexed, but the file is gone
+            failed           reason explains the fault
+
+        Expected outcomes are values, not exceptions, so an adapter can map
+        them onto HTTP status codes or an Android dialog without catching
+        control flow.
+        """
+
+        safe_path = self.resolve_document_path(filename)
+
+        if safe_path is None:
+            return DeleteResult(
+                DELETE_INVALID_PATH,
+                filename=filename,
+            )
+
+        safe_filename = os.path.basename(safe_path)
+
+        if not self.state.has_document(safe_filename):
+            return DeleteResult(
+                DELETE_NOT_INDEXED,
+                filename=safe_filename,
+            )
+
+        if not os.path.isfile(safe_path):
+            return DeleteResult(
+                DELETE_FILE_NOT_FOUND,
+                filename=safe_filename,
+            )
+
+        try:
+
+            os.remove(safe_path)
+
+            self.remove_document(safe_filename)
+
+        except Exception as error:
+
+            return DeleteResult(
+                DELETE_FAILED,
+                filename=safe_filename,
+                reason=str(error),
+            )
+
+        self.mark_ready()
+
+        log(
+            "[DELETE] Removed and "
+            "incrementally unindexed: "
+            f"{safe_filename}"
+        )
+
+        return DeleteResult(
+            DELETE_DELETED,
+            filename=safe_filename,
+        )
+
+    def bulk_delete(
+        self,
+        filenames,
+        log=print,
+    ):
+        """
+        Delete many documents inside ONE SQLite transaction.
+
+        This deliberately does NOT loop over `delete()`: that would open a
+        connection and commit per document, losing the all-or-nothing
+        property the API promises. Instead one connection is opened, every
+        document is unindexed with `commit=False`, and the batch is committed
+        once at the end (or rolled back if the batch itself fails).
+
+        Accounting is per document:
+
+            deleted     unindexed and, when present, removed from disk
+            not_found   neither indexed nor on disk
+            failed      raised; reason recorded, batch continues
+
+        A document that is indexed but whose file is missing is still
+        unindexed and counted as deleted, which is how a half-removed
+        document is repaired.
+
+        Known limitation, preserved from the original implementation: memory
+        is mutated before the commit, so if the commit itself fails and rolls
+        back, the in-memory index and SQLite disagree until the next rebuild.
+        Fixing that means deferring memory mutation until after a successful
+        commit, which is a behavior change and is tracked separately.
+        """
+
+        requested = normalize_requested_filenames(
+            filenames
+        )
+
+        result = BulkDeleteResult(requested)
+
+        connection = self.store.connection()
+
+        try:
+
+            for filename in requested:
+
+                file_path = self.config.document_path(
+                    filename
+                )
+
+                try:
+
+                    indexed_exists = (
+                        self.state.has_document(filename)
+                    )
+
+                    filesystem_exists = os.path.isfile(
+                        file_path
+                    )
+
+                    if (
+                        not indexed_exists
+                        and not filesystem_exists
+                    ):
+                        result.not_found.append(filename)
+                        continue
+
+                    self.remove_document(
+                        filename,
+                        connection=connection,
+                        commit=False,
+                    )
+
+                    if filesystem_exists:
+                        os.remove(file_path)
+
+                    result.deleted.append(filename)
+
+                    log(
+                        "[BULK DELETE] Removed and "
+                        "incrementally unindexed: "
+                        f"{filename}"
+                    )
+
+                except Exception as error:
+
+                    result.failed.append({
+                        "filename": filename,
+                        "reason": str(error),
+                    })
+
+            connection.commit()
+
+        except Exception:
+
+            connection.rollback()
+            raise
+
+        finally:
+
+            connection.close()
+
+        self.mark_ready()
+
+        return result
 
     # --------------------------------------------------------
     # REBUILD
