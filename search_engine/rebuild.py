@@ -52,7 +52,17 @@ def build_snapshot_from_folder(
     new_filename_index = {}
     new_page_text_index = {}
 
-    for filename in os.listdir(config.data_folder):
+    # Sorted, not bare os.listdir.
+    #
+    # Enumeration order is filesystem-specific, and it becomes the insertion
+    # order of all four dictionaries. The final ranking sort is stable, so
+    # documents with equal scores keep that insertion order - which made the
+    # order of tied results differ between deployments holding identical
+    # corpora, and change on any machine that rebuilt after a restore.
+    #
+    # Sorting costs nothing measurable against the extraction work in this
+    # loop and makes a rebuild reproducible.
+    for filename in sorted(os.listdir(config.data_folder)):
 
         if not config.is_supported_document(filename):
             continue

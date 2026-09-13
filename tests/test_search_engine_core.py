@@ -2042,12 +2042,13 @@ def test_rebuild_preserves_search_results(search_engine):
     Rebuild is a persistence operation, not a re-ranking.
 
     Compared as a sorted (title, score) multiset rather than payload
-    equality: tied scores keep insertion order, and rebuild enumerates the
-    data folder with os.listdir, whose order is filesystem-specific, so
-    equal-scoring documents may legitimately come back in a different order.
-    Exact list equality would assert an implementation detail that is not
-    stable across deployments. test_rebuild_is_order_stable_in_place pins
-    the part that is.
+    equality, because a rebuild legitimately reorders ties: before it, tied
+    documents sit in import order, and after it they sit in filename order,
+    since rebuild enumerates the folder with sorted(os.listdir()). The
+    scores themselves must not move, and that is what this asserts.
+    test_rebuild_ranks_ties_in_filename_order pins the new tie order, and
+    test_rebuild_is_order_stable_in_place pins that repeating a rebuild
+    stops changing anything.
     """
 
     queries = [
@@ -2290,6 +2291,70 @@ def test_filename_terms_persist_in_tokenization_order(engine, tmp_path):
     assert persisted_order() == expected
 
     assert engine.snapshot().filename_index[filename] == expected
+
+
+def test_rebuild_ranks_ties_in_filename_order(engine, tmp_path):
+    """
+    Equal-scoring documents must come back in filename order after a rebuild.
+
+    The final sort is descending by score and stable, so tied documents keep
+    the order the rebuild inserted them in. That used to be os.listdir
+    order - whatever the filesystem returned - so two deployments holding
+    identical corpora could disagree about tie order, and one machine could
+    see its results reshuffled by a rebuild or a restore.
+
+    Six tied documents, not two or three: an unsorted enumeration happens to
+    come out alphabetical one time in N!, so a small corpus could pass by
+    luck and prove nothing.
+    """
+
+    corpus = str(tmp_path / "tied")
+
+    names = [
+        "zulu",
+        "yankee",
+        "xray",
+        "whiskey",
+        "victor",
+        "uniform",
+    ]
+
+    for name in names:
+
+        make_txt(
+            corpus,
+            f"{name}.txt",
+            "identical body text for every document\n",
+        )
+
+    import_paths(engine, [
+        os.path.join(corpus, f"{name}.txt")
+        for name in names
+    ])
+
+    # Before a rebuild the tie order is import order, which is legitimate:
+    # the caller chose it. Enumerating a folder is what must be normalized.
+    before = engine.search("identical")
+
+    assert titles(before) == [f"{name}.txt" for name in names]
+
+    engine.rebuild(log=lambda *args: None)
+
+    after = engine.search("identical")
+
+    scores = [item["score"] for item in after["results"]]
+
+    assert len(scores) == len(names)
+    assert len(set(scores)) == 1, "these documents were meant to tie"
+
+    assert titles(after) == sorted(titles(after))
+
+    assert titles(after) == [
+        f"{name}.txt"
+        for name in sorted(names)
+    ]
+
+    assert_consistent(engine)
 
 
 def test_search_after_restart_matches_search_before_it(

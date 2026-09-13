@@ -169,57 +169,6 @@ BARE_LIST_QUERIES = [
     '"zzzqqq wwwww"',
 ]
 
-# Behavior changes approved after the refactor parity proof was closed out
-# (90 checks / 0 mismatches at commit 9d3a05a). These are fixes, not
-# refactor drift, and each is pinned by a test in
-# tests/test_search_engine_core.py.
-#
-# Cause: filename_terms was deduplicated with set(filename_words), whose
-# iteration order follows PYTHONHASHSEED. Ranking compares the query against
-# a space-joined word list, so a permuted order silently changed which
-# filename bonuses applied. Both storage paths now use dict.fromkeys.
-#
-# These reproduce only when the reference build has RESTARTED after a
-# rebuild, because a running server holds the correct order in memory and
-# the permutation exists only in the persisted rows. If they do not
-# reproduce, the tool says so rather than failing.
-APPROVED_CHANGES = {
-    "computer network": (
-        "Computer_Network_Technologies.docx regains the +50 filename "
-        "substring bonus (score 0.7625 -> 0.9625); its words were persisted "
-        "as computer/technologies/network."
-    ),
-    "machine learning": (
-        "Machine_Learning_Introduction.pdf regains the +50 substring bonus "
-        "(0.7625 -> 0.9625); persisted as introduction/learning/machine."
-    ),
-    '"machine learning"': (
-        "Same document, quoted form (0.725 -> 0.96)."
-    ),
-    "Cyber Security": (
-        "Cyber_Security_Fundamentals.txt regains the +50 substring bonus "
-        "(0.7625 -> 0.9625); persisted as security/cyber/fundamentals."
-    ),
-    "Cyber Security Fundamentals.txt": (
-        "Exact-filename query regains the +100 bonus and reaches the full "
-        "score (0.7625 -> 1.0, filename_score 60 -> 160)."
-    ),
-    "Data Structures and Algorithms": (
-        "Exact-name query regains the +100 bonus (0.7625 -> 1.0, "
-        "filename_score 80 -> 180); the words were persisted fully reversed "
-        "as algorithms/and/structures/data."
-    ),
-    "cyber fundamentals": (
-        "The only score that DROPS, and it is a false positive being "
-        "removed (0.9625 -> 0.7125, filename_score 90 -> 40). The permuted "
-        "order security/cyber/fundamentals made 'cyber fundamentals' a "
-        "contiguous substring of the filename by accident; in the real "
-        "order cyber/security/fundamentals it is not, so the +50 substring "
-        "bonus was never owed. Per-word bonuses still apply."
-    ),
-}
-
-
 DOCUMENTS = [
     "BCS502_Module_2.pdf",
     "Network_Security_Notes.pdf",
@@ -241,10 +190,13 @@ def canonicalize_ranking(payload):
     deployment-specific freedom. Ordering between distinct scores, and every
     value inside a result, is still compared exactly.
 
+    The fixed build enumerates a rebuild with sorted(os.listdir()), so its
+    own tie order is deterministic. This canonicalization is still needed
+    when diffing against a reference build from before that change, whose
+    tie order follows its filesystem.
+
     Known limit: a tie group split across a page boundary still reports a
     mismatch, because the two servers put different documents on the page.
-    The durable fix is deterministic enumeration in rebuild, which is a
-    behavior change and is reported separately rather than made here.
     """
 
     if not isinstance(payload, dict):
@@ -334,31 +286,137 @@ def fetch(base, method, path, **kwargs):
     return response.status_code, normalize(response.json())
 
 
-def compare(label, old, new, approved=None):
-    """
-    Compare one check.
-
-    `approved` marks a difference that is an intended behavior change rather
-    than a regression. Approved differences are reported and do not fail the
-    run; everything else does. An approved difference that stops reproducing
-    is noted, because that means the reference build or the fix moved.
-    """
-
+def compare(label, old, new):
     if old != new:
-
-        if approved:
-            print(f"APPROVED CHANGE {label}")
-            print(f"  {approved}")
-            return 0
-
         print(f"MISMATCH {label}")
         print(f"  old: {json.dumps(old, sort_keys=True)[:1200]}")
         print(f"  new: {json.dumps(new, sort_keys=True)[:1200]}")
         return 1
 
-    if approved:
-        print(f"NOTE {label}")
-        print(f"  approved change did not reproduce: {approved}")
+    return 0
+
+
+# Score fields whose values are computed from the order of a document's
+# filename words. A difference confined to these, over an unchanged set of
+# documents, is the expected effect of the deterministic filename-order fix
+# rather than a regression.
+FILENAME_DERIVED_FIELDS = {
+    "filename_score",
+    "phrase_score",
+    "score",
+    "match_type",
+}
+
+
+def compare_search(label, old, new):
+    """
+    Compare one /api/search check, structurally rather than by query name.
+
+    Identical payloads pass. A difference confined to filename-derived
+    scores, over an unchanged document set and unchanged pagination, is
+    reported as a filename-order delta and does not fail. Everything else
+    fails.
+
+    Structural classification matters because the pre-fix reference is
+    nondeterministic: which of its documents came back with permuted
+    filename words depends on the PYTHONHASHSEED of the process that last
+    wrote its database. An allowlist of affected query strings therefore
+    changed from run to run and could not be trusted in either direction.
+    Classifying the shape of the difference is stable, and still fails on
+    any delta that touches content scores, snippets, highlights, pages,
+    document membership or pagination.
+    """
+
+    if old == new:
+        return 0
+
+    old_status, old_payload = old
+    new_status, new_payload = new
+
+    if old_status != new_status:
+        print(f"MISMATCH {label}: status {old_status} != {new_status}")
+        return 1
+
+    if not isinstance(old_payload, dict) or not isinstance(new_payload, dict):
+        print(f"MISMATCH {label}: payload shape "
+              f"{type(old_payload).__name__} -> {type(new_payload).__name__}")
+        print(f"  old: {json.dumps(old_payload, sort_keys=True)[:800]}")
+        print(f"  new: {json.dumps(new_payload, sort_keys=True)[:800]}")
+        return 1
+
+    if old_payload.get("pagination") != new_payload.get("pagination"):
+        print(f"MISMATCH {label}: pagination block changed")
+        print(f"  old: {json.dumps(old_payload.get('pagination'), sort_keys=True)}")
+        print(f"  new: {json.dumps(new_payload.get('pagination'), sort_keys=True)}")
+        return 1
+
+    old_results = old_payload.get("results", [])
+    new_results = new_payload.get("results", [])
+
+    old_titles = {item["title"] for item in old_results}
+    new_titles = {item["title"] for item in new_results}
+
+    if old_titles != new_titles:
+        print(f"MISMATCH {label}: document set changed")
+        print(f"  only in old: {sorted(old_titles - new_titles)}")
+        print(f"  only in new: {sorted(new_titles - old_titles)}")
+        return 1
+
+    # Ranking must stay sorted by descending score in the build under test,
+    # whatever the scores themselves turn out to be.
+    new_scores = [item["score"] for item in new_results]
+
+    if new_scores != sorted(new_scores, reverse=True):
+        print(f"MISMATCH {label}: new results are not sorted by descending score")
+        return 1
+
+    old_by_title = {item["title"]: item for item in old_results}
+    new_by_title = {item["title"]: item for item in new_results}
+
+    differing = {}
+
+    for title in old_by_title:
+
+        fields = {
+            key
+            for key in old_by_title[title]
+            if old_by_title[title][key] != new_by_title[title][key]
+        }
+
+        if fields:
+            differing[title] = fields
+
+    unexplained = {
+        title: fields - FILENAME_DERIVED_FIELDS
+        for title, fields in differing.items()
+    }
+
+    unexplained = {
+        title: fields
+        for title, fields in unexplained.items()
+        if fields
+    }
+
+    if unexplained:
+        print(f"MISMATCH {label}")
+        for title in sorted(unexplained):
+            print(f"  {title}: unexpected changes to {sorted(unexplained[title])}")
+            for field in sorted(unexplained[title]):
+                print(f"     {field}: "
+                      f"old={old_by_title[title][field]!r} "
+                      f"new={new_by_title[title][field]!r}")
+        return 1
+
+    print(f"FILENAME-ORDER DELTA {label}")
+    print("  confined to filename-derived scores over an unchanged document")
+    print("  set; the expected effect of deterministic filename word order.")
+
+    for title in sorted(differing):
+        parts = ", ".join(
+            f"{field} {old_by_title[title][field]} -> {new_by_title[title][field]}"
+            for field in sorted(differing[title])
+        )
+        print(f"    {title}: {parts}")
 
     return 0
 
@@ -415,20 +473,18 @@ def main(argv=None):
 
     for query in QUERIES:
         checks += 1
-        failures += compare(
+        failures += compare_search(
             f"/api/search?q={query!r}",
             fetch(OLD, "GET", "/api/search", params={"q": query}),
             fetch(NEW, "GET", "/api/search", params={"q": query}),
-            approved=APPROVED_CHANGES.get(query),
         )
 
     for query in BRANCH_QUERIES:
         checks += 1
-        failures += compare(
+        failures += compare_search(
             f"/api/search?q={query!r} [branch]",
             fetch(OLD, "GET", "/api/search", params={"q": query}),
             fetch(NEW, "GET", "/api/search", params={"q": query}),
-            approved=APPROVED_CHANGES.get(query),
         )
 
     # Guard the quirk itself: if these ever come back as a paginated
