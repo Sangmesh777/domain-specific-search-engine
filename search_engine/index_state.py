@@ -255,3 +255,200 @@ class IndexState:
             f"documents={counts['documents']}, "
             f"content_terms={counts['content_terms']})"
         )
+
+
+# ----------------------------------------------------------------------
+# Copy-on-write mutation
+#
+# These are pure functions. They read a snapshot, build complete
+# replacement containers, and return them. They never mutate the
+# containers they are given, and they never publish: the caller decides
+# when to swap, so a half-built index is never visible.
+#
+# Copy depth is deliberate. The four top-level mappings are shallow
+# copied, and a nested posting list is copied only when this document
+# changes it. That keeps a single-document update proportional to the
+# document and its terms rather than to the corpus contents.
+# ----------------------------------------------------------------------
+
+
+def _containers_from(current):
+    """Validate a snapshot mapping and return its four containers."""
+
+    missing = [
+        field
+        for field in REQUIRED_SNAPSHOT_FIELDS
+        if field not in current
+    ]
+
+    if missing:
+        raise SnapshotIncompleteError(
+            f"current state is missing required fields: {sorted(missing)}"
+        )
+
+    return (
+        current["inverted_index"],
+        current["document_metadata"],
+        current["filename_index"],
+        current["page_text_index"],
+    )
+
+
+def _term_counts(content_words):
+    """Count occurrences of each term in a token stream."""
+
+    counts = {}
+
+    for word in content_words:
+        counts[word] = counts.get(word, 0) + 1
+
+    return counts
+
+
+def plan_add_document(
+    current,
+    filename,
+    metadata,
+    filename_words,
+    pages,
+    content_words,
+):
+    """
+    Return replacement containers with `filename` added or replaced.
+
+    Replaces the document wholesale, so a re-upload cannot leave terms
+    from the previous revision behind. Callers that need that behaviour
+    should call [plan_upsert_document] instead, which also removes the
+    previously indexed terms.
+    """
+
+    inverted, metadata_index, filename_index, page_index = _containers_from(
+        current
+    )
+
+    new_inverted = dict(inverted)
+    new_metadata = dict(metadata_index)
+    new_filename = dict(filename_index)
+    new_pages = dict(page_index)
+
+    new_metadata[filename] = metadata
+    new_filename[filename] = filename_words
+    new_pages[filename] = pages
+
+    for term, count in _term_counts(content_words).items():
+        postings = dict(new_inverted.get(term, {}))
+        postings[filename] = count
+        new_inverted[term] = postings
+
+    return {
+        "inverted_index": new_inverted,
+        "document_metadata": new_metadata,
+        "filename_index": new_filename,
+        "page_text_index": new_pages,
+    }
+
+
+def plan_remove_document(current, filename, old_term_counts):
+    """
+    Return replacement containers with `filename` removed.
+
+    A term whose last document is removed disappears from the inverted
+    index entirely, so the term count stays truthful. Removing a
+    document that is not present is a no-op that still returns complete
+    replacement containers.
+    """
+
+    inverted, metadata_index, filename_index, page_index = _containers_from(
+        current
+    )
+
+    new_inverted = dict(inverted)
+    new_metadata = dict(metadata_index)
+    new_filename = dict(filename_index)
+    new_pages = dict(page_index)
+
+    for term in old_term_counts or ():
+        posting_list = new_inverted.get(term)
+
+        if not posting_list:
+            continue
+
+        remaining = dict(posting_list)
+        remaining.pop(filename, None)
+
+        if remaining:
+            new_inverted[term] = remaining
+        else:
+            new_inverted.pop(term, None)
+
+    new_metadata.pop(filename, None)
+    new_filename.pop(filename, None)
+    new_pages.pop(filename, None)
+
+    return {
+        "inverted_index": new_inverted,
+        "document_metadata": new_metadata,
+        "filename_index": new_filename,
+        "page_text_index": new_pages,
+    }
+
+
+def plan_upsert_document(
+    current,
+    filename,
+    metadata,
+    filename_words,
+    pages,
+    content_words,
+    old_term_counts,
+):
+    """
+    Return replacement containers with `filename` re-indexed.
+
+    Combines removal and addition in a single pass over the containers,
+    so re-uploading a document publishes one replacement rather than
+    two. Terms that the previous revision had and the new one does not
+    are dropped, which is what stops a re-upload from leaving stale
+    postings behind.
+    """
+
+    inverted, metadata_index, filename_index, page_index = _containers_from(
+        current
+    )
+
+    new_inverted = dict(inverted)
+    new_metadata = dict(metadata_index)
+    new_filename = dict(filename_index)
+    new_pages = dict(page_index)
+
+    # Drop the previous revision's postings.
+    for term in old_term_counts or ():
+        posting_list = new_inverted.get(term)
+
+        if not posting_list:
+            continue
+
+        remaining = dict(posting_list)
+        remaining.pop(filename, None)
+
+        if remaining:
+            new_inverted[term] = remaining
+        else:
+            new_inverted.pop(term, None)
+
+    # Install the new revision.
+    new_metadata[filename] = metadata
+    new_filename[filename] = filename_words
+    new_pages[filename] = pages
+
+    for term, count in _term_counts(content_words).items():
+        postings = dict(new_inverted.get(term, {}))
+        postings[filename] = count
+        new_inverted[term] = postings
+
+    return {
+        "inverted_index": new_inverted,
+        "document_metadata": new_metadata,
+        "filename_index": new_filename,
+        "page_text_index": new_pages,
+    }

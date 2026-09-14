@@ -59,3 +59,17 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if os.path.basename(str(item.fspath)) == LIVE_TEST_MODULE:
             item.add_marker(skip_marker)
+
+
+@pytest.fixture
+def app_module():
+    """
+    The real application module.
+
+    Imported lazily so the SEARCH_ENGINE_DATA_DIR set above is always in
+    effect before app.py resolves its data folder.
+    """
+
+    import app
+
+    return app

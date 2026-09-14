@@ -27,12 +27,13 @@ this work was done. See [Status](#status) for exactly what is real.
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| Flask search API | **Working** | 159 tests pass with the server running |
-| `search_engine/` extraction | **In progress** | 3 of 6 layers; 825 lines out of app.py plus index ownership |
+| Flask search API | **Working** | 179 tests pass with the server running |
+| `search_engine/` extraction | **In progress** | 3 of 6 layers; app.py 4085 -> 3327 lines; index ownership fully copy-on-write |
 | Ranking engine | **Working** | 79/79 golden vectors, exact binary64 |
 | React web UI | **Working** | builds cleanly; live search verified through the proxy |
-| Test suite | **Working** | 159 pass with a server; 150 pass + 9 skip without one |
+| Test suite | **Working** | 179 pass with a server; 170 pass + 9 skip without one |
 | Shadow parity gate | **Working** | 21,365 comparisons, 0 differences |
+| Memory mutation coherence | **Closed** | copy-on-write publish; 20 tests, all 5 negative controls confirmed |
 | JVM semantics | **Verified** | real JVM: 0 genuine divergences, rounding exact |
 | Golden vector gate | **Working** | catches drift; proven by negative control |
 | Corpus sidecar | **Generated** | 13 documents, 191 terms, integrity hash verified |

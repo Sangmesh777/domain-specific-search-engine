@@ -63,6 +63,8 @@ if not os.path.exists(DATA_FOLDER):
 from search_engine.index_state import (
     IndexState,
     SnapshotIncompleteError,
+    plan_remove_document,
+    plan_upsert_document,
 )
 from search_engine.sanitize import sanitize_upload_filename
 from search_engine.text import (
@@ -130,39 +132,51 @@ PAGE_TEXT_INDEX = {}
 # directly, but they must always refer to the *same objects* as
 # INDEX_STATE's, or a reader could see a mixture of two generations.
 #
-# The four globals are rebound in exactly three places, all of which now
-# go through INDEX_STATE.replace_snapshot + sync_index_globals_from_state:
+# The four globals are rebound in exactly five places, and every one
+# of them goes through publish_index_state(). That function must be
+# called under INDEX_DATA_LOCK; it swaps the containers and re-points
+# the globals in the same critical section:
 #
 #   1. load_database_from_sqlite  (SQLite restore at startup)
 #   2. load_database              (JSON snapshot restore at startup)
 #   3. rebuild_database           (atomic swap after a full rebuild)
+#   4. incrementally_index_document  (single-document upsert)
+#   5. incrementally_remove_document (single-document delete)
+#
+# publish_index_state() is the only thing that calls replace_snapshot,
+# and two structural tests in tests/test_memory_mutation_atomicity.py
+# enforce both halves of that rule against the source. It matters
+# because execute_search captures all four globals under this lock, so a
+# sync performed after releasing it would let a reader capture a
+# half-rebound set - one global from the new generation, one from the
+# old.
 #
 # assert_index_state_consistent() proves the invariant, and
 # tests/test_index_state.py exercises those paths.
 #
-# KNOWN COHERENCE GAP, NOT FIXED HERE
-# -----------------------------------
-# The single-document path is different. incrementally_index_document
-# holds INDEX_DATA_LOCK and calls _remove_document_from_memory and
-# _add_document_to_memory, which mutate the *live published containers*
-# in place (DOCUMENT_METADATA[filename] = ..., REAL_INVERTED_INDEX.pop(...),
-# and so on) rather than building replacements and swapping.
+# MEMORY MUTATION IS COPY-ON-WRITE
+# ---------------------------------
+# Every in-memory index change now builds replacement containers and
+# publishes them in a single swap, through publish_index_state() above.
+# Nothing mutates a published container any more, so a search that
+# captured its four references under INDEX_DATA_LOCK sees one complete
+# generation.
 #
-# Writers are serialised by the lock, and object identity is preserved,
-# so the invariant below still holds. But a search that captured its
-# references under INDEX_DATA_LOCK can still observe a partially
-# updated index: for example a document present in DOCUMENT_METADATA but
-# not yet in FILENAME_INDEX.
+# The two mutation helpers that used to write into the live containers
+# in place (_remove_document_from_memory and _add_document_to_memory)
+# are gone. Their logic lives in search_engine/index_state.py as the
+# pure functions plan_remove_document, plan_add_document and
+# plan_upsert_document, which build and return replacements and mutate
+# nothing.
 #
-# rebuild_database does not have this problem; it assembles new
-# containers and swaps once.
+# incrementally_index_document uses plan_upsert_document so that a
+# re-upload publishes once rather than twice, and always drops the
+# previous revision's terms.
 #
-# This is pre-existing behaviour, deliberately left unchanged because
-# this change is meant to add an ownership boundary, not alter ranking
-# or mutation semantics. Fixing it is the next step of the migration:
-# move both helpers onto IndexState and have them return replacement
-# containers for the caller to swap in, so every mutation path is
-# copy-on-write.
+# tools/shadow_parity.py proves the resulting state is identical to what
+# the original in-place helpers produced, by running the originals from
+# a pinned git revision against the same input and comparing all four
+# containers.
 # ------------------------------------------------------------------
 
 INDEX_STATE = IndexState(
@@ -177,8 +191,11 @@ def sync_index_globals_from_state():
     """
     Point the legacy module globals at INDEX_STATE's containers.
 
-    Call this immediately after any INDEX_STATE.replace_snapshot so the
-    two representations name the same objects.
+    Not called directly any more. Use publish_index_state(), which does
+    this inside the same INDEX_DATA_LOCK critical section that swaps the
+    state. Calling it on its own leaves a window in which the four
+    globals name different generations, and execute_search captures all
+    four of them under that lock.
     """
 
     global REAL_INVERTED_INDEX
@@ -192,6 +209,20 @@ def sync_index_globals_from_state():
     DOCUMENT_METADATA = snapshot["document_metadata"]
     FILENAME_INDEX = snapshot["filename_index"]
     PAGE_TEXT_INDEX = snapshot["page_text_index"]
+
+
+def publish_index_state(replacement):
+    """
+    Publish a replacement snapshot and re-point the legacy globals.
+
+    MUST be called while holding INDEX_DATA_LOCK. Readers capture all
+    four globals under that same lock, so publishing outside it would
+    let a reader observe two generations at once, which is exactly the
+    incoherence this whole mechanism exists to prevent.
+    """
+
+    INDEX_STATE.replace_snapshot(replacement)
+    sync_index_globals_from_state()
 
 
 def assert_index_state_consistent():
@@ -689,14 +720,12 @@ def load_database_from_sqlite():
 
         with INDEX_DATA_LOCK:
 
-            INDEX_STATE.replace_snapshot({
+            publish_index_state({
                 "inverted_index": new_inverted_index,
                 "document_metadata": new_metadata,
                 "filename_index": new_filename_index,
                 "page_text_index": new_page_text_index,
             })
-
-        sync_index_globals_from_state()
 
 
 def get_document_term_counts_from_sqlite(
@@ -714,103 +743,6 @@ def get_document_term_counts_from_sqlite(
         ).fetchall()
 
     return dict(rows)
-
-
-def _remove_document_from_memory(
-    filename,
-    old_term_counts,
-):
-    """
-    Remove one document without rebuilding the corpus.
-
-    Posting-list dictionaries are replaced rather than mutated in-place,
-    so searches already holding a posting list keep a stable object.
-    """
-
-    for term in old_term_counts:
-
-        posting_list = (
-            REAL_INVERTED_INDEX.get(term)
-        )
-
-        if not posting_list:
-            continue
-
-        new_posting_list = dict(
-            posting_list
-        )
-
-        new_posting_list.pop(
-            filename,
-            None,
-        )
-
-        if new_posting_list:
-            REAL_INVERTED_INDEX[
-                term
-            ] = new_posting_list
-        else:
-            REAL_INVERTED_INDEX.pop(
-                term,
-                None,
-            )
-
-    DOCUMENT_METADATA.pop(
-        filename,
-        None,
-    )
-
-    FILENAME_INDEX.pop(
-        filename,
-        None,
-    )
-
-    PAGE_TEXT_INDEX.pop(
-        filename,
-        None,
-    )
-
-
-def _add_document_to_memory(
-    filename,
-    metadata,
-    filename_words,
-    pages,
-    content_words,
-):
-    DOCUMENT_METADATA[filename] = metadata
-
-    # Filename index is document-local.
-    FILENAME_INDEX[filename] = (
-        filename_words
-    )
-
-    PAGE_TEXT_INDEX[filename] = pages
-
-    # Each changed posting list gets a new dictionary object.
-    term_counts = {}
-
-    for word in content_words:
-        term_counts[word] = (
-            term_counts.get(word, 0) + 1
-        )
-
-    for term, count in term_counts.items():
-
-        old_postings = REAL_INVERTED_INDEX.get(
-            term,
-            {}
-        )
-
-        new_postings = dict(
-            old_postings
-        )
-
-        new_postings[filename] = count
-
-        REAL_INVERTED_INDEX[
-            term
-        ] = new_postings
 
 
 def incrementally_index_document(
@@ -880,19 +812,22 @@ def incrementally_index_document(
         )
     )
 
+    # Build the replacement containers without publishing, then swap
+    # once. A concurrent search sees the old generation or the new one,
+    # never a document present in metadata but missing from the filename
+    # index.
     with INDEX_DATA_LOCK:
 
-        _remove_document_from_memory(
-            filename,
-            old_term_counts,
-        )
-
-        _add_document_to_memory(
-            filename,
-            metadata,
-            filename_words,
-            pages,
-            content_words,
+        publish_index_state(
+            plan_upsert_document(
+                INDEX_STATE.snapshot(),
+                filename,
+                metadata,
+                filename_words,
+                pages,
+                content_words,
+                old_term_counts,
+            )
         )
 
     # Persist only this document and its postings.
@@ -1011,9 +946,12 @@ def incrementally_remove_document(
 
     with INDEX_DATA_LOCK:
 
-        _remove_document_from_memory(
-            filename,
-            old_term_counts,
+        publish_index_state(
+            plan_remove_document(
+                INDEX_STATE.snapshot(),
+                filename,
+                old_term_counts,
+            )
         )
 
     own_connection = connection is None
@@ -1165,14 +1103,18 @@ def load_database():
 
             loaded_page_text_index = {}
 
-    INDEX_STATE.replace_snapshot({
-        "inverted_index": loaded_inverted_index,
-        "document_metadata": loaded_document_metadata,
-        "filename_index": loaded_filename_index,
-        "page_text_index": loaded_page_text_index,
-    })
+    # Startup restore. This runs once at import, before Flask serves any
+    # request, so the lock is uncontended - but it is taken anyway so the
+    # invariant is uniform and checkable: every publication of index
+    # state happens inside one INDEX_DATA_LOCK critical section.
+    with INDEX_DATA_LOCK:
 
-    sync_index_globals_from_state()
+        publish_index_state({
+            "inverted_index": loaded_inverted_index,
+            "document_metadata": loaded_document_metadata,
+            "filename_index": loaded_filename_index,
+            "page_text_index": loaded_page_text_index,
+        })
 
 
 # ============================================================
@@ -1361,15 +1303,18 @@ def rebuild_database():
     global PAGE_TEXT_INDEX
 
     # One pointer swap: searches see old or new, never a partial build.
+    # The globals are re-pointed inside the same critical section,
+    # because execute_search captures all four of them under this lock.
+    # Re-pointing them after releasing it would let a reader capture a
+    # half-rebound set - one global from the new generation and one from
+    # the old.
     with INDEX_DATA_LOCK:
-        INDEX_STATE.replace_snapshot({
+        publish_index_state({
             "inverted_index": new_inverted_index,
             "document_metadata": new_document_metadata,
             "filename_index": new_filename_index,
             "page_text_index": new_page_text_index,
         })
-
-    sync_index_globals_from_state()
 
     print(
         "[REBUILD] Active snapshot swapped atomically."
