@@ -2,8 +2,6 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
 import os
-import json
-import sqlite3
 import math
 import re
 import PyPDF2
@@ -404,84 +402,50 @@ def start_background_rebuild():
 # SQLITE INCREMENTAL INDEX
 # ============================================================
 
-SQLITE_SCHEMA = """
-PRAGMA journal_mode=WAL;
 
-CREATE TABLE IF NOT EXISTS documents (
-    filename TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    path TEXT NOT NULL,
-    total_words INTEGER NOT NULL,
-    page_count INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS term_postings (
-    term TEXT NOT NULL,
-    filename TEXT NOT NULL,
-    term_count INTEGER NOT NULL,
-    PRIMARY KEY (term, filename)
-);
-
-CREATE INDEX IF NOT EXISTS idx_term_postings_term
-ON term_postings(term);
-
-CREATE INDEX IF NOT EXISTS idx_term_postings_filename
-ON term_postings(filename);
-
-CREATE TABLE IF NOT EXISTS filename_terms (
-    filename TEXT NOT NULL,
-    term TEXT NOT NULL,
-    PRIMARY KEY (filename, term)
-);
-
-CREATE INDEX IF NOT EXISTS idx_filename_terms_term
-ON filename_terms(term);
-
-CREATE TABLE IF NOT EXISTS pages (
-    filename TEXT NOT NULL,
-    page_number INTEGER NOT NULL,
-    text TEXT NOT NULL,
-    PRIMARY KEY (filename, page_number)
-);
-"""
-
+# ============================================================
+# PERSISTENCE ADAPTERS
+# ============================================================
+#
+# Every function below is a thin adapter over search_engine/storage.py.
+# The storage layer owns the SQL, the schema, the JSON files and the
+# filesystem paths; this file owns publication and the module-level
+# index globals. Nothing here may grow storage logic back into the
+# application.
 
 def get_sqlite_connection():
-    connection = sqlite3.connect(
-        SQLITE_DB_FILE,
-        timeout=30,
-    )
+    """
+    Thin adapter over storage.get_sqlite_connection.
 
-    connection.execute(
-        "PRAGMA foreign_keys = ON"
-    )
+    Kept so the document-import and bulk-delete paths - which this
+    milestone must not touch - keep their existing call sites.
+    """
 
-    return connection
+    return storage.get_sqlite_connection(
+        SQLITE_DB_FILE
+    )
 
 
 def initialize_sqlite_store():
     """
-    Create the SQLite index.
+    Create the SQLite index, migrating once if it is empty.
 
-    If search.db is empty but the legacy JSON index contains data,
-    migrate the existing index once. Future document changes use
-    incremental SQLite updates instead of full JSON rebuilds.
+    Orchestration only: the schema, the migration write and the
+    reconstruction all live in search_engine/storage.py. The single
+    connection is held here so the schema, the emptiness check and a
+    possible migration happen on one connection, exactly as before.
     """
 
     os.makedirs(DATA_FOLDER, exist_ok=True)
 
     with get_sqlite_connection() as connection:
 
-        connection.executescript(
-            SQLITE_SCHEMA
+        storage.create_schema(
+            connection
         )
 
-        count = connection.execute(
-            "SELECT COUNT(*) FROM documents"
-        ).fetchone()[0]
-
         if (
-            count == 0
+            storage.count_documents(connection) == 0
             and DOCUMENT_METADATA
         ):
             sync_sqlite_from_memory(
@@ -495,254 +459,132 @@ def initialize_sqlite_store():
 
 def sync_sqlite_from_memory(connection=None):
     """
-    Full synchronization used only for initial migration or an explicit
-    manual full rebuild. Normal uploads/deletes do NOT call this.
+    Thin adapter: publish-then-persist bookkeeping stays in app.py.
+
+    The snapshot is read through IndexState rather than off the module
+    globals. They name the same objects, but this way the four
+    containers provably come from one generation.
     """
 
-    close_connection = False
+    snapshot = INDEX_STATE.snapshot()
 
-    if connection is None:
-        connection = get_sqlite_connection()
-        close_connection = True
-
-    try:
-        connection.execute(
-            "DELETE FROM term_postings"
-        )
-
-        connection.execute(
-            "DELETE FROM filename_terms"
-        )
-
-        connection.execute(
-            "DELETE FROM pages"
-        )
-
-        connection.execute(
-            "DELETE FROM documents"
-        )
-
-        for filename, metadata in DOCUMENT_METADATA.items():
-
-            connection.execute(
-                """
-                INSERT INTO documents
-                (filename, title, path, total_words, page_count)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    filename,
-                    metadata["title"],
-                    metadata["path"],
-                    metadata["total_words"],
-                    metadata["page_count"],
-                ),
-            )
-
-        for term, posting_list in REAL_INVERTED_INDEX.items():
-
-            connection.executemany(
-                """
-                INSERT INTO term_postings
-                (term, filename, term_count)
-                VALUES (?, ?, ?)
-                """,
-                [
-                    (
-                        term,
-                        filename,
-                        count,
-                    )
-                    for filename, count
-                    in posting_list.items()
-                ],
-            )
-
-        for filename, filename_words in FILENAME_INDEX.items():
-
-            # Store unique terms only.
-            connection.executemany(
-                """
-                INSERT OR IGNORE INTO filename_terms
-                (filename, term)
-                VALUES (?, ?)
-                """,
-                [
-                    (
-                        filename,
-                        term,
-                    )
-                    for term in set(filename_words)
-                ],
-            )
-
-        for filename, pages in PAGE_TEXT_INDEX.items():
-
-            connection.executemany(
-                """
-                INSERT INTO pages
-                (filename, page_number, text)
-                VALUES (?, ?, ?)
-                """,
-                [
-                    (
-                        filename,
-                        page_data["page"],
-                        page_data["text"],
-                    )
-                    for page_data in pages
-                ],
-            )
-
-        connection.commit()
-
-    finally:
-
-        if close_connection:
-            connection.close()
+    # Named rather than splatted: snapshot() also carries `generation`,
+    # which is not part of the persisted state.
+    return storage.sync_sqlite_from_memory(
+        db_path=SQLITE_DB_FILE,
+        connection=connection,
+        inverted_index=snapshot["inverted_index"],
+        document_metadata=snapshot["document_metadata"],
+        filename_index=snapshot["filename_index"],
+        page_text_index=snapshot["page_text_index"],
+    )
 
 
 def load_database_from_sqlite():
     """
-    Load the complete persisted SQLite snapshot into the existing
-    in-memory search structures once at application startup.
+    Rebuild from SQLite, then publish once under the lock.
+
+    storage returns a complete snapshot and installs nothing, so the
+    publication order stays in one place in this file.
     """
 
-    global REAL_INVERTED_INDEX
-    global DOCUMENT_METADATA
-    global FILENAME_INDEX
-    global PAGE_TEXT_INDEX
+    replacement = storage.load_database_from_sqlite(
+        db_path=SQLITE_DB_FILE,
+    )
 
-    with get_sqlite_connection() as connection:
+    # An empty SQLite store means "leave the active state alone", which
+    # is what the original early return did.
+    if replacement is None:
+        return
 
-        document_rows = connection.execute(
-            """
-            SELECT
-                filename,
-                title,
-                path,
-                total_words,
-                page_count
-            FROM documents
-            """
-        ).fetchall()
+    with INDEX_DATA_LOCK:
 
-        if not document_rows:
-            return
-
-        new_metadata = {}
-
-        for (
-            filename,
-            title,
-            path,
-            total_words,
-            page_count,
-        ) in document_rows:
-
-            new_metadata[filename] = {
-                "title": title,
-                "path": path,
-                "total_words": total_words,
-                "page_count": page_count,
-            }
-
-        new_inverted_index = {}
-
-        posting_rows = connection.execute(
-            """
-            SELECT
-                term,
-                filename,
-                term_count
-            FROM term_postings
-            """
-        ).fetchall()
-
-        for (
-            term,
-            filename,
-            term_count,
-        ) in posting_rows:
-
-            if term not in new_inverted_index:
-                new_inverted_index[term] = {}
-
-            new_inverted_index[term][
-                filename
-            ] = term_count
-
-        new_filename_index = {}
-
-        filename_rows = connection.execute(
-            """
-            SELECT
-                filename,
-                term
-            FROM filename_terms
-            ORDER BY filename, rowid
-            """
-        ).fetchall()
-
-        for filename, term in filename_rows:
-
-            new_filename_index.setdefault(
-                filename,
-                [],
-            ).append(term)
-
-        new_page_text_index = {}
-
-        page_rows = connection.execute(
-            """
-            SELECT
-                filename,
-                page_number,
-                text
-            FROM pages
-            ORDER BY filename, page_number
-            """
-        ).fetchall()
-
-        for (
-            filename,
-            page_number,
-            text,
-        ) in page_rows:
-
-            new_page_text_index.setdefault(
-                filename,
-                [],
-            ).append({
-                "page": page_number,
-                "text": text,
-            })
-
-        with INDEX_DATA_LOCK:
-
-            publish_index_state({
-                "inverted_index": new_inverted_index,
-                "document_metadata": new_metadata,
-                "filename_index": new_filename_index,
-                "page_text_index": new_page_text_index,
-            })
+        publish_index_state(replacement)
 
 
-def get_document_term_counts_from_sqlite(
-    filename,
+def get_document_term_counts_from_sqlite(filename):
+    """Thin adapter over storage.get_document_term_counts_from_sqlite."""
+
+    return storage.get_document_term_counts_from_sqlite(
+        SQLITE_DB_FILE,
+        filename,
+    )
+
+
+def load_database():
+    """
+    Restore the legacy JSON snapshot files, then publish once.
+
+    storage builds the snapshot from the four files, seeded with the
+    current containers so a missing file leaves its container alone.
+    """
+
+    with INDEX_DATA_LOCK:
+
+        publish_index_state(
+            storage.load_json_snapshot(
+                index_file=INDEX_FILE,
+                meta_file=META_FILE,
+                filename_index_file=FILENAME_INDEX_FILE,
+                page_text_file=PAGE_TEXT_FILE,
+                current=INDEX_STATE.snapshot(),
+            )
+        )
+
+
+def save_database_snapshot(
+    inverted_index,
+    document_metadata,
+    filename_index,
+    page_text_index,
 ):
-    with get_sqlite_connection() as connection:
+    """Thin adapter over storage.save_database_snapshot."""
 
-        rows = connection.execute(
-            """
-            SELECT term, term_count
-            FROM term_postings
-            WHERE filename = ?
-            """,
-            (filename,),
-        ).fetchall()
+    storage.save_database_snapshot(
+        index_file=INDEX_FILE,
+        meta_file=META_FILE,
+        filename_index_file=FILENAME_INDEX_FILE,
+        page_text_file=PAGE_TEXT_FILE,
+        inverted_index=inverted_index,
+        document_metadata=document_metadata,
+        filename_index=filename_index,
+        page_text_index=page_text_index,
+    )
 
-    return dict(rows)
+
+def save_database():
+    """
+    Capture one generation under the lock, then write it out.
+
+    No call sites: this was already unreachable before the extraction.
+    It is kept because it is part of the persistence API and removing it
+    is a separate decision from relocating it.
+    """
+
+    with INDEX_DATA_LOCK:
+
+        snapshot = INDEX_STATE.snapshot()
+
+    save_database_snapshot(
+        snapshot["inverted_index"],
+        snapshot["document_metadata"],
+        snapshot["filename_index"],
+        snapshot["page_text_index"],
+    )
+
+
+from search_engine import storage
+
+
+
+
+
+
+
+
+
+
+
 
 
 def incrementally_index_document(
@@ -999,180 +841,16 @@ def queue_index_refresh():
     return False
 
 
-def load_database():
-
-    # Seed from the current state so that a missing snapshot file
-    # leaves that container untouched, which is what the previous
-    # implementation did by never rebinding in that case.
-    current = INDEX_STATE.snapshot()
-
-    loaded_inverted_index = current["inverted_index"]
-    loaded_document_metadata = current["document_metadata"]
-    loaded_filename_index = current["filename_index"]
-    loaded_page_text_index = current["page_text_index"]
-
-    if os.path.exists(INDEX_FILE):
-
-        try:
-
-            with open(
-                INDEX_FILE,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                loaded_inverted_index = json.load(
-                    file
-                )
-
-        except Exception as error:
-
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"content index: {error}"
-            )
-
-            loaded_inverted_index = {}
-
-    if os.path.exists(META_FILE):
-
-        try:
-
-            with open(
-                META_FILE,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                loaded_document_metadata = json.load(
-                    file
-                )
-
-        except Exception as error:
-
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"metadata: {error}"
-            )
-
-            loaded_document_metadata = {}
-
-    if os.path.exists(FILENAME_INDEX_FILE):
-
-        try:
-
-            with open(
-                FILENAME_INDEX_FILE,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                loaded_filename_index = json.load(
-                    file
-                )
-
-        except Exception as error:
-
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"filename index: {error}"
-            )
-
-            loaded_filename_index = {}
-
-    if os.path.exists(PAGE_TEXT_FILE):
-
-        try:
-
-            with open(
-                PAGE_TEXT_FILE,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                loaded_page_text_index = json.load(
-                    file
-                )
-
-        except Exception as error:
-
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"page text index: {error}"
-            )
-
-            loaded_page_text_index = {}
-
-    # Startup restore. This runs once at import, before Flask serves any
-    # request, so the lock is uncontended - but it is taken anyway so the
-    # invariant is uniform and checkable: every publication of index
-    # state happens inside one INDEX_DATA_LOCK critical section.
-    with INDEX_DATA_LOCK:
-
-        publish_index_state({
-            "inverted_index": loaded_inverted_index,
-            "document_metadata": loaded_document_metadata,
-            "filename_index": loaded_filename_index,
-            "page_text_index": loaded_page_text_index,
-        })
 
 
 # ============================================================
 # DATABASE SAVE
 # ============================================================
 
-def atomic_write_json(path, data):
-    temp_path = path + ".tmp"
-
-    with open(
-        temp_path,
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(data, file, indent=2)
-        file.flush()
-        os.fsync(file.fileno())
-
-    os.replace(temp_path, path)
 
 
-def save_database_snapshot(
-    inverted_index,
-    document_metadata,
-    filename_index,
-    page_text_index,
-):
-    atomic_write_json(
-        INDEX_FILE,
-        inverted_index,
-    )
-
-    atomic_write_json(
-        META_FILE,
-        document_metadata,
-    )
-
-    atomic_write_json(
-        FILENAME_INDEX_FILE,
-        filename_index,
-    )
-
-    atomic_write_json(
-        PAGE_TEXT_FILE,
-        page_text_index,
-    )
 
 
-def save_database():
-    with INDEX_DATA_LOCK:
-        snapshot = (
-            REAL_INVERTED_INDEX,
-            DOCUMENT_METADATA,
-            FILENAME_INDEX,
-            PAGE_TEXT_INDEX,
-        )
-
-    save_database_snapshot(*snapshot)
 
 def rebuild_database():
     """

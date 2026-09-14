@@ -10,8 +10,9 @@
 #   2. the golden-vector parity gate
 #   3. the shadow parity gate for extracted modules
 #   4. the mutation-equivalence gate for the index planners
-#   5. the corpus sidecar integrity check
-#   6. the complete pytest suite
+#   5. the storage reconstruction parity gate
+#   6. the corpus sidecar integrity check
+#   7. the complete pytest suite
 #
 # The pytest suite is hermetic: the live HTTP tests skip themselves with
 # an explicit reason when no server is listening on 127.0.0.1:5000.
@@ -60,6 +61,14 @@ if python3 -m tools.mutation_equivalence; then
     echo "mutation equivalence OK"
 else
     echo "mutation equivalence FAILED"
+    failures=$((failures + 1))
+fi
+
+step "Storage reconstruction parity (extracted layer vs monolith)"
+if python3 -m tools.storage_equivalence; then
+    echo "storage parity OK"
+else
+    echo "storage parity FAILED"
     failures=$((failures + 1))
 fi
 
