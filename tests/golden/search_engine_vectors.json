@@ -351,6 +351,34 @@
       {
         "expected": [],
         "input": "   "
+      },
+      {
+        "expected": [],
+        "input": "𠀀"
+      },
+      {
+        "expected": [
+          "𠀀𠀀"
+        ],
+        "input": "𠀀𠀀"
+      },
+      {
+        "expected": [],
+        "input": "𝟎"
+      },
+      {
+        "expected": [
+          "𝟎𝟎"
+        ],
+        "input": "𝟎𝟎"
+      },
+      {
+        "expected": [],
+        "input": "😀"
+      },
+      {
+        "expected": [],
+        "input": "😀😀"
       }
     ],
     "filename_tokenize": [
@@ -401,6 +429,24 @@
       {
         "expected": [],
         "input": ""
+      },
+      {
+        "expected": [
+          "𠀀"
+        ],
+        "input": "𠀀"
+      },
+      {
+        "expected": [
+          "𠀀𠀀"
+        ],
+        "input": "𠀀𠀀"
+      },
+      {
+        "expected": [
+          "𝟎"
+        ],
+        "input": "𝟎"
       }
     ],
     "normalize_search_query": [
@@ -435,6 +481,8 @@
     ],
     "notes": [
       "These vectors pin Unicode, rounding and sanitizer semantics.",
+      "Token length is measured in characters (code points), not",
+      "UTF-16 units: Python drops a single U+20000 but keeps two.",
       "The Kotlin port must reproduce every expected value exactly.",
       "Expected values were produced by the Python engine itself."
     ],
@@ -657,6 +705,74 @@
       {
         "expected": "",
         "input": ""
+      },
+      {
+        "expected": "ab.txt",
+        "input": "a!b.txt"
+      },
+      {
+        "expected": "file-name.txt",
+        "input": "file-name.txt"
+      },
+      {
+        "expected": "ab.txt",
+        "input": "a+b.txt"
+      },
+      {
+        "expected": "ab.txt",
+        "input": "a(b).txt"
+      },
+      {
+        "expected": "ab.txt",
+        "input": "a@b.txt"
+      },
+      {
+        "expected": "abc.txt",
+        "input": "a#b$c.txt"
+      },
+      {
+        "expected": "100.txt",
+        "input": "100%.txt"
+      },
+      {
+        "expected": "a___b.txt",
+        "input": "a___b.txt"
+      },
+      {
+        "expected": "lead.txt",
+        "input": "__lead.txt"
+      },
+      {
+        "expected": "trail__.txt",
+        "input": "trail__.txt"
+      },
+      {
+        "expected": "-lead.txt",
+        "input": "-lead.txt"
+      },
+      {
+        "expected": "",
+        "input": "._.txt"
+      },
+      {
+        "expected": "a_b.txt",
+        "input": "a  b.txt"
+      },
+      {
+        "expected": "a_b.txt",
+        "input": "a\tb.txt"
+      },
+      {
+        "expected": "a_b.txt",
+        "input": "a\nb.txt"
+      },
+      {
+        "expected": "a..b...txt",
+        "input": "...a..b...txt"
+      },
+      {
+        "expected": "MiXeD_CaSe.TXT",
+        "input": "MiXeD CaSe.TXT"
       }
     ]
   },
