@@ -147,6 +147,98 @@ takes `page_text_index` as its first parameter, and `app.py` — the
 adapter, which owns the index — supplies it. Withdrawing the core's
 access to globals is the point of the exercise.
 
+### Layer 3: `search_engine/index_state.py` (done)
+
+The four parallel dictionaries that form the index —
+
+```text
+REAL_INVERTED_INDEX   term -> {document: frequency}
+DOCUMENT_METADATA     document -> {title, path, total_words, page_count}
+FILENAME_INDEX        document -> ordered filename tokens
+PAGE_TEXT_INDEX       document -> [{page, text}]
+```
+
+— now have a single owner, `IndexState`. No Flask, no HTTP, no
+filesystem, no ranking logic.
+
+The engine maintains them with copy-on-write: build replacement
+containers, then swap them in under a lock, so a reader sees the old
+snapshot or the new one and never a half-built index. `IndexState` gives
+that pattern a name. All three rebinding sites now go through
+`INDEX_STATE.replace_snapshot` + `sync_index_globals_from_state`:
+
+| Function | What it publishes |
+| --- | --- |
+| `load_database_from_sqlite` | SQLite restore at startup |
+| `load_database` | JSON snapshot restore at startup |
+| `rebuild_database` | atomic swap after a full rebuild |
+
+`app.py` keeps the legacy global names because the ranking and
+persistence code still reads them directly, so they must name the *same
+objects* as `INDEX_STATE`'s or a reader could see two generations.
+`assert_index_state_consistent()` checks that identity, and
+`tests/test_index_state.py` calls it after exercising each path. There
+is a test that deliberately desynchronises a global and requires the
+guard to catch it, so the guard cannot quietly become a no-op.
+
+#### `snapshot()` returns references, on purpose
+
+`IndexState.snapshot()` hands back the live containers; it does not
+copy. This matches what the engine already did:
+
+```python
+with INDEX_DATA_LOCK:
+    active_inverted_index = REAL_INVERTED_INDEX   # a reference
+```
+
+Copying there would put a full index copy on every search.
+`tools/measure_snapshot_cost.py` measures the difference:
+
+```text
+ documents    terms  snapshot() us   deep_snapshot() ms      ratio
+       100     3929           0.34                11.30    33,659x
+       500     4000           0.32                42.50   131,222x
+      1000     4000           0.51                82.39   162,652x
+```
+
+So the contract is three-part, and all three parts are tested:
+`snapshot()` is cheap and read-only, `deep_snapshot()` is isolated and
+expensive, and mutation means building replacements and calling
+`replace_snapshot()`. A test that only checked "the snapshot is
+independent" would pass for the wrong implementation and fail in
+production on latency.
+
+`test_readers_never_observe_a_partial_replacement` was checked against a
+deliberately broken, non-atomic `replace_snapshot`; it fails with
+`torn read: metadata ['doc_a.txt'] vs postings ['doc_b.txt']`, so the
+test genuinely detects tearing rather than merely running.
+
+### Known coherence gap, not fixed by layer 3
+
+`incrementally_index_document` holds `INDEX_DATA_LOCK` and calls
+`_remove_document_from_memory` and `_add_document_to_memory`, which
+mutate the **live published containers in place** rather than building
+replacements and swapping:
+
+```python
+DOCUMENT_METADATA[filename] = metadata
+REAL_INVERTED_INDEX.pop(term)
+```
+
+Writers are serialised by the lock and object identity is preserved, so
+the ownership invariant holds and no test regresses. But a search that
+captured its references can still observe a partially updated index — a
+document present in `DOCUMENT_METADATA` but not yet in `FILENAME_INDEX`,
+for example. `rebuild_database` does not have this problem.
+
+This is pre-existing behaviour and was deliberately left unchanged:
+layer 3 adds an ownership boundary, it does not alter mutation
+semantics. **Fixing it is the next step**, and it is the reason the next
+phase is "move `_add_document_to_memory` and `_remove_document_from_memory`
+onto `IndexState`" rather than a cosmetic relocation: those two helpers
+must build replacement containers and return them for the caller to
+swap in, so every mutation path becomes copy-on-write.
+
 ### Remaining extraction surface (measured)
 
 `tools/` reports this via the dependency analysis below. The remaining
