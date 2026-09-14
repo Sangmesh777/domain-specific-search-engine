@@ -1,0 +1,557 @@
+{
+  "corpus_totals": {
+    "content_terms": 191,
+    "documents": 13,
+    "filenames_indexed": 13,
+    "page_text_entries": 13
+  },
+  "documents": [
+    {
+      "content_terms": {
+        "adds": 1,
+        "appears": 1,
+        "connects": 1,
+        "exchange": 1,
+        "hosts": 1,
+        "in": 1,
+        "medium": 1,
+        "network": 2,
+        "networked": 1,
+        "networking": 1,
+        "notes": 1,
+        "opening": 1,
+        "over": 1,
+        "packets": 1,
+        "paragraph": 1,
+        "protocols": 1,
+        "security": 1,
+        "shared": 1,
+        "sharedterm": 1,
+        "systems": 1,
+        "the": 1
+      },
+      "extension": "txt",
+      "filename_terms": [
+        "network",
+        "security",
+        "notes"
+      ],
+      "name": "network_security_notes.txt",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "network security notes\na network connects hosts. networking adds protocols.\nnetworked systems exchange packets over a shared medium.\nsharedterm appears in the opening paragraph.\n"
+        }
+      ],
+      "source_name": "network_security_notes.txt",
+      "title": "network_security_notes.txt",
+      "total_words": 22
+    },
+    {
+      "content_terms": {
+        "and": 1,
+        "appears": 1,
+        "bcs502": 1,
+        "covers": 1,
+        "document": 1,
+        "fundamentals": 1,
+        "handout": 2,
+        "in": 1,
+        "lecture": 2,
+        "module": 1,
+        "routing": 1,
+        "sharedterm": 1,
+        "switching": 1,
+        "the": 1,
+        "this": 1
+      },
+      "extension": "pdf",
+      "filename_terms": [
+        "bcs502",
+        "module",
+        "2"
+      ],
+      "name": "BCS502_Module_2.pdf",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "bcs502 module 2 lecture handout\nthis document covers routing and switching fundamentals.\nsharedterm appears in the lecture handout."
+        }
+      ],
+      "source_name": "BCS502 Module 2.pdf",
+      "title": "BCS502_Module_2.pdf",
+      "total_words": 17
+    },
+    {
+      "content_terms": {
+        "appears": 1,
+        "asymmetric": 1,
+        "basics": 1,
+        "ciphers": 2,
+        "cryptography": 2,
+        "in": 1,
+        "key": 1,
+        "one": 1,
+        "primer": 1,
+        "sharedterm": 1,
+        "symmetric": 1,
+        "the": 1,
+        "two": 1,
+        "use": 2
+      },
+      "extension": "docx",
+      "filename_terms": [
+        "cryptography",
+        "basics"
+      ],
+      "name": "cryptography_basics.docx",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "cryptography basics\nsymmetric ciphers use one key. asymmetric ciphers use two.\nsharedterm appears in the cryptography primer.\n"
+        }
+      ],
+      "source_name": "cryptography_basics.docx",
+      "title": "cryptography_basics.docx",
+      "total_words": 17
+    },
+    {
+      "content_terms": {
+        "across": 1,
+        "an": 1,
+        "appears": 1,
+        "append": 1,
+        "distributed": 3,
+        "every": 1,
+        "history": 1,
+        "in": 1,
+        "is": 1,
+        "keeps": 1,
+        "ledger": 4,
+        "nodes": 1,
+        "note": 1,
+        "only": 1,
+        "records": 1,
+        "replicated": 1,
+        "sharedterm": 1,
+        "the": 2,
+        "transactions": 1
+      },
+      "extension": "txt",
+      "filename_terms": [
+        "distributed",
+        "ledger"
+      ],
+      "name": "distributed_ledger.txt",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "a distributed ledger records transactions.\nthe distributed ledger is replicated across nodes.\nevery distributed ledger keeps an append only history.\nsharedterm appears in the ledger note.\n"
+        }
+      ],
+      "source_name": "distributed_ledger.txt",
+      "title": "distributed_ledger.txt",
+      "total_words": 25
+    },
+    {
+      "content_terms": {
+        "9901xyz": 1,
+        "9902xyz": 1,
+        "and": 1,
+        "appears": 1,
+        "batch": 1,
+        "codes": 1,
+        "identifier": 2,
+        "in": 1,
+        "is": 2,
+        "note": 1,
+        "numbers": 1,
+        "numeric": 1,
+        "second": 1,
+        "serial": 1,
+        "sharedterm": 1,
+        "the": 2
+      },
+      "extension": "txt",
+      "filename_terms": [
+        "numeric",
+        "fragments"
+      ],
+      "name": "numeric_fragments.txt",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "serial numbers and codes\nthe batch identifier is 9901xyz.\na second identifier is 9902xyz.\nsharedterm appears in the numeric note.\n"
+        }
+      ],
+      "source_name": "numeric_fragments.txt",
+      "title": "numeric_fragments.txt",
+      "total_words": 19
+    },
+    {
+      "content_terms": {
+        "and": 3,
+        "appears": 1,
+        "break": 1,
+        "café": 1,
+        "capital": 1,
+        "character": 1,
+        "cjk": 1,
+        "devanagari": 1,
+        "digits": 1,
+        "dotted": 1,
+        "figure": 1,
+        "half": 1,
+        "in": 1,
+        "line": 1,
+        "narrow": 1,
+        "naïve": 1,
+        "next": 1,
+        "no": 1,
+        "note": 1,
+        "notes": 1,
+        "omega": 1,
+        "quarter": 1,
+        "résumé": 1,
+        "sharedterm": 1,
+        "sigma": 1,
+        "space": 2,
+        "stanbul": 1,
+        "the": 1,
+        "unicode": 2,
+        "width": 1,
+        "zero": 1
+      },
+      "extension": "txt",
+      "filename_terms": [
+        "unicode",
+        "notes"
+      ],
+      "name": "unicode_notes.txt",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "unicode notes\ncafé résumé naïve\nhalf ½ and a quarter ¼\nomega ω and sigma σ\ndevanagari ५ digits\ncjk 字 character\nno break figure space narrow space\nnextline and zero​width\ni̇stanbul capital dotted i\nsharedterm appears in the unicode note.\n"
+        }
+      ],
+      "source_name": "unicode_notes.txt",
+      "title": "unicode_notes.txt",
+      "total_words": 35
+    },
+    {
+      "content_terms": {
+        "alpha": 2,
+        "appears": 1,
+        "in": 1,
+        "is": 1,
+        "mesh": 1,
+        "network": 2,
+        "report": 2,
+        "sharedterm": 1,
+        "the": 2,
+        "topology": 1
+      },
+      "extension": "txt",
+      "filename_terms": [
+        "prefix",
+        "network",
+        "alpha"
+      ],
+      "name": "prefix_network_alpha.txt",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "network alpha report\nthe network topology is a mesh.\nsharedterm appears in the alpha report.\n"
+        }
+      ],
+      "source_name": "prefix_network_alpha.txt",
+      "title": "prefix_network_alpha.txt",
+      "total_words": 14
+    },
+    {
+      "content_terms": {
+        "appears": 1,
+        "beta": 2,
+        "in": 1,
+        "is": 1,
+        "network": 2,
+        "report": 2,
+        "sharedterm": 1,
+        "star": 1,
+        "the": 2,
+        "topology": 1
+      },
+      "extension": "txt",
+      "filename_terms": [
+        "prefix",
+        "network",
+        "beta"
+      ],
+      "name": "prefix_network_beta.txt",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "network beta report\nthe network topology is a star.\nsharedterm appears in the beta report.\n"
+        }
+      ],
+      "source_name": "prefix_network_beta.txt",
+      "title": "prefix_network_beta.txt",
+      "total_words": 14
+    },
+    {
+      "content_terms": {
+        "appears": 2,
+        "at": 1,
+        "beacon": 1,
+        "document": 3,
+        "end": 1,
+        "filler1": 1,
+        "filler10": 1,
+        "filler11": 1,
+        "filler12": 1,
+        "filler13": 1,
+        "filler14": 1,
+        "filler15": 1,
+        "filler16": 1,
+        "filler17": 1,
+        "filler18": 1,
+        "filler19": 1,
+        "filler2": 1,
+        "filler20": 1,
+        "filler21": 1,
+        "filler22": 1,
+        "filler23": 1,
+        "filler24": 1,
+        "filler25": 1,
+        "filler26": 1,
+        "filler27": 1,
+        "filler28": 1,
+        "filler29": 1,
+        "filler3": 1,
+        "filler30": 1,
+        "filler31": 1,
+        "filler32": 1,
+        "filler33": 1,
+        "filler34": 1,
+        "filler35": 1,
+        "filler36": 1,
+        "filler37": 1,
+        "filler38": 1,
+        "filler39": 1,
+        "filler4": 1,
+        "filler40": 1,
+        "filler41": 1,
+        "filler42": 1,
+        "filler43": 1,
+        "filler44": 1,
+        "filler45": 1,
+        "filler46": 1,
+        "filler47": 1,
+        "filler48": 1,
+        "filler49": 1,
+        "filler5": 1,
+        "filler50": 1,
+        "filler51": 1,
+        "filler52": 1,
+        "filler53": 1,
+        "filler54": 1,
+        "filler55": 1,
+        "filler56": 1,
+        "filler57": 1,
+        "filler58": 1,
+        "filler59": 1,
+        "filler6": 1,
+        "filler7": 1,
+        "filler8": 1,
+        "filler9": 1,
+        "in": 1,
+        "keyword": 1,
+        "long": 2,
+        "of": 1,
+        "only": 1,
+        "padding": 59,
+        "sharedterm": 1,
+        "text": 59,
+        "the": 3,
+        "this": 1,
+        "very": 1
+      },
+      "extension": "txt",
+      "filename_terms": [
+        "long",
+        "document"
+      ],
+      "name": "long_document.txt",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "long document\nfiller1 padding text filler2 padding text filler3 padding text filler4 padding text filler5 padding text filler6 padding text filler7 padding text filler8 padding text filler9 padding text filler10 padding text filler11 padding text filler12 padding text filler13 padding text filler14 padding text filler15 padding text filler16 padding text filler17 padding text filler18 padding text filler19 padding text filler20 padding text filler21 padding text filler22 padding text filler23 padding text filler24 padding text filler25 padding text filler26 padding text filler27 padding text filler28 padding text filler29 padding text filler30 padding text filler31 padding text filler32 padding text filler33 padding text filler34 padding text filler35 padding text filler36 padding text filler37 padding text filler38 padding text filler39 padding text filler40 padding text filler41 padding text filler42 padding text filler43 padding text filler44 padding text filler45 padding text filler46 padding text filler47 padding text filler48 padding text filler49 padding text filler50 padding text filler51 padding text filler52 padding text filler53 padding text filler54 padding text filler55 padding text filler56 padding text filler57 padding text filler58 padding text filler59 padding text\nthe keyword beacon appears only at the very end of this document.\nsharedterm appears in the long document.\n"
+        }
+      ],
+      "source_name": "long_document.txt",
+      "title": "long_document.txt",
+      "total_words": 197
+    },
+    {
+      "content_terms": {
+        "an": 1,
+        "and": 1,
+        "appears": 1,
+        "combines": 1,
+        "content": 1,
+        "design": 2,
+        "documents": 1,
+        "engine": 1,
+        "filename": 1,
+        "in": 1,
+        "index": 1,
+        "inverted": 1,
+        "maps": 1,
+        "note": 1,
+        "ranking": 1,
+        "score": 2,
+        "search": 1,
+        "sharedterm": 1,
+        "terms": 1,
+        "the": 1,
+        "to": 1
+      },
+      "extension": "txt",
+      "filename_terms": [
+        "search",
+        "engine",
+        "design"
+      ],
+      "name": "search_engine_design.txt",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "search engine design\nan inverted index maps terms to documents.\nranking combines a filename score and a content score.\nsharedterm appears in the design note.\n"
+        }
+      ],
+      "source_name": "search_engine_design.txt",
+      "title": "search_engine_design.txt",
+      "total_words": 23
+    },
+    {
+      "content_terms": {
+        "appears": 1,
+        "are": 1,
+        "by": 1,
+        "case": 2,
+        "filename": 1,
+        "in": 2,
+        "note": 1,
+        "notes": 1,
+        "preserved": 1,
+        "sanitizer": 1,
+        "sharedterm": 1,
+        "spaces": 1,
+        "the": 3,
+        "title": 2
+      },
+      "extension": "txt",
+      "filename_terms": [
+        "title",
+        "case",
+        "notes"
+      ],
+      "name": "Title_Case_Notes.txt",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "title case notes\nspaces in the filename are preserved by the sanitizer.\nsharedterm appears in the title case note.\n"
+        }
+      ],
+      "source_name": "Title Case Notes.txt",
+      "title": "Title_Case_Notes.txt",
+      "total_words": 19
+    },
+    {
+      "content_terms": {
+        "appears": 1,
+        "document": 1,
+        "extraction": 1,
+        "in": 1,
+        "level": 1,
+        "page": 2,
+        "probe": 2,
+        "sharedterm": 1,
+        "text": 2,
+        "the": 1,
+        "this": 1,
+        "verifies": 1
+      },
+      "extension": "txt",
+      "filename_terms": [
+        "page",
+        "text",
+        "probe"
+      ],
+      "name": "page_text_probe.txt",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "page text probe\nthis document verifies page level text extraction.\nsharedterm appears in the probe.\n"
+        }
+      ],
+      "source_name": "page_text_probe.txt",
+      "title": "page_text_probe.txt",
+      "total_words": 15
+    },
+    {
+      "content_terms": {
+        "appears": 1,
+        "in": 1,
+        "minimal": 2,
+        "note": 2,
+        "sharedterm": 1,
+        "the": 1
+      },
+      "extension": "txt",
+      "filename_terms": [
+        "minimal",
+        "note"
+      ],
+      "name": "minimal_note.txt",
+      "page_count": 1,
+      "pages": [
+        {
+          "page": 1,
+          "text": "minimal note\nsharedterm appears in the minimal note.\n"
+        }
+      ],
+      "source_name": "minimal_note.txt",
+      "title": "minimal_note.txt",
+      "total_words": 8
+    }
+  ],
+  "format": "corpus-sidecar",
+  "generated_by": "tools/build_corpus_sidecar.py",
+  "integrity": {
+    "algorithm": "sha256",
+    "canonical_json_sha256": "fe1b5c085b5f8379de34dc41a8495d777ae5964d468fe7681dee7988a0c7a922"
+  },
+  "tokenizer_contract": {
+    "content_tokenize": "lower() the whole string, replace every character that is not (isalnum() or isspace()) with a single space, split on whitespace, drop tokens whose length is < 2.",
+    "filename_tokenize": "identical, but keep every non-empty token including single characters.",
+    "notes": [
+      "Python str.lower() applies full Unicode lowercase and may change string length (U+0130 -> U+0069 U+0307).",
+      "Python str.isalnum() is true for non-decimal numerics such as U+00BD and U+00B2, which Java's Character.isLetterOrDigit rejects.",
+      "Python whitespace for str.split() includes U+001C-U+001F, which Java's Character.isWhitespace rejects, while Java excludes U+00A0, which Python accepts."
+    ]
+  },
+  "version": 1
+}

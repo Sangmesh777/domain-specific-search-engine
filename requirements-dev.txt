@@ -1,2 +1,12 @@
-pytest>=9.1,<10
+# Runtime dependencies of app.py
+flask>=3.0,<4
+flask-cors>=4.0,<7
+PyPDF2>=3.0,<4
+python-docx>=1.1,<2
+
+# Test and tooling dependencies
+pytest>=8.0,<10
 requests>=2.32,<3
+# Used by tools/corpus_materialize.py to build the .pdf golden corpus
+# documents so the real extraction path is exercised.
+fpdf2>=2.7,<3
