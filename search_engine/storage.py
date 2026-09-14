@@ -16,11 +16,12 @@ them if none of this reaches back into the web application.
 
 Two invariants are load-bearing and easy to break by accident:
 
-* `filename_terms` is read back with `ORDER BY filename, rowid`, so the
-  order of a document's filename tokens is whatever insertion order
-  produced. It is not sorted, and it is not stable across a delete and
-  re-add. That is the existing behaviour, and the parity tool compares
-  against it rather than against an idealised version.
+* `filename_terms` stores a `position` per row and is read back with
+  `ORDER BY filename, position`, so a document's token sequence
+  round-trips exactly, including repeated tokens. It used to be a
+  `set()` under a (filename, term) primary key, which lost both the
+  order and the duplicates and changed `normalized_filename` across a
+  restart.
 * `save_database_snapshot` writes four files in sequence, each
   individually atomic. It is not atomic across all four, and never was.
 
@@ -60,8 +61,9 @@ ON term_postings(filename);
 
 CREATE TABLE IF NOT EXISTS filename_terms (
     filename TEXT NOT NULL,
+    position INTEGER NOT NULL,
     term TEXT NOT NULL,
-    PRIMARY KEY (filename, term)
+    PRIMARY KEY (filename, position)
 );
 
 CREATE INDEX IF NOT EXISTS idx_filename_terms_term
@@ -164,19 +166,29 @@ def sync_sqlite_from_memory(
 
         for filename, filename_words in filename_index.items():
 
-            # Store unique terms only.
+            # Every occurrence, in order, with its position.
+            #
+            # This used to be `set(filename_words)` under a primary key
+            # of (filename, term). That lost the sequence twice over: set
+            # iteration order decided the stored order, and the primary
+            # key silently collapsed repeated tokens. Reading back in
+            # rowid order therefore produced a different filename_index
+            # than the one that was live, which changes
+            # `normalized_filename` and breaks quoted filename phrases.
             connection.executemany(
                 """
-                INSERT OR IGNORE INTO filename_terms
-                (filename, term)
-                VALUES (?, ?)
+                INSERT INTO filename_terms
+                (filename, position, term)
+                VALUES (?, ?, ?)
                 """,
                 [
                     (
                         filename,
+                        position,
                         term,
                     )
-                    for term in set(filename_words)
+                    for position, term
+                    in enumerate(filename_words)
                 ],
             )
 
@@ -279,7 +291,7 @@ def load_database_from_sqlite(*, db_path):
                 filename,
                 term
             FROM filename_terms
-            ORDER BY filename, rowid
+            ORDER BY filename, position
             """
         ).fetchall()
 
@@ -543,6 +555,177 @@ def create_schema(connection):
     connection.executescript(
         SQLITE_SCHEMA
     )
+
+
+# The schema revision that gave `filename_terms` an explicit `position`.
+# Databases created before it stored one row per distinct token with the
+# order implied by insertion, which did not round-trip.
+FILENAME_TERM_POSITION_SCHEMA = 2
+
+
+def filename_term_columns(connection):
+    """Return the column names of `filename_terms`, or [] if absent."""
+
+    rows = connection.execute(
+        "PRAGMA table_info(filename_terms)"
+    ).fetchall()
+
+    return [row[1] for row in rows]
+
+
+def natural_filename_terms(filename, tokenize_filename):
+    """
+    Return the filename tokens the writers would produce for `filename`.
+
+    Both writers derive their tokens as
+    `tokenize_filename(os.path.splitext(filename)[0])`, so the sequence
+    is reproducible from the stored document name alone. That is what
+    makes a repair possible without re-reading any document.
+
+    `tokenize_filename` is injected rather than imported: persistence
+    should not own tokenization semantics, it should apply whatever the
+    engine says they are.
+    """
+
+    return tokenize_filename(
+        os.path.splitext(filename)[0]
+    )
+
+
+def _read_filename_terms(connection):
+    """Return {filename: [(position, term), ...]} in stored order."""
+
+    rows = connection.execute(
+        """
+        SELECT filename, position, term
+        FROM filename_terms
+        ORDER BY filename, position
+        """
+    ).fetchall()
+
+    stored = {}
+
+    for filename, position, term in rows:
+        stored.setdefault(filename, []).append((position, term))
+
+    return stored
+
+
+def migrate_filename_terms(connection, *, tokenize_filename):
+    """
+    Bring `filename_terms` up to the position-carrying schema and repair
+    any document whose stored token sequence is wrong.
+
+    Two things are fixed here, because the old schema lost the sequence
+    in two independent ways:
+
+    * it defaulted to a `(filename, term)` primary key, so repeated
+      tokens were collapsed;
+    * the writers inserted `set(filename_words)`, so the surviving order
+      was set-iteration order - different in every process.
+
+    Existing databases may carry either or both. Because the correct
+    sequence is derivable from the document name, every document is
+    checked against the tokenizer and rewritten when it disagrees. A
+    database that is already correct is left untouched, so this is a
+    no-op when there is nothing to do, and it is idempotent.
+
+    Returns a summary so the caller - and the tests - can see what
+    happened rather than having to infer it.
+    """
+
+    columns = filename_term_columns(connection)
+
+    schema_changed = "position" not in columns
+
+    if schema_changed:
+
+        # SQLite cannot alter a primary key, so the table is rebuilt.
+        # `filename_terms` holds only derived data, so nothing is lost:
+        # every row is regenerated from `documents` below.
+        connection.execute(
+            "DROP TABLE IF EXISTS filename_terms"
+        )
+
+        connection.execute(
+            """
+            CREATE TABLE filename_terms (
+                filename TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                term TEXT NOT NULL,
+                PRIMARY KEY (filename, position)
+            )
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_filename_terms_term
+            ON filename_terms(term)
+            """
+        )
+
+    documents = connection.execute(
+        "SELECT filename FROM documents ORDER BY filename"
+    ).fetchall()
+
+    stored = _read_filename_terms(connection)
+
+    repaired = []
+
+    for (filename,) in documents:
+
+        expected = natural_filename_terms(
+            filename,
+            tokenize_filename,
+        )
+
+        existing = stored.get(filename, [])
+
+        # Compare the term sequence only. Positions are rewritten from
+        # scratch, so a correct sequence under wrong positions still
+        # counts as correct once the rows are replaced below.
+        if (
+            not schema_changed
+            and [term for _position, term in existing] == expected
+        ):
+            continue
+
+        connection.execute(
+            "DELETE FROM filename_terms WHERE filename = ?",
+            (filename,),
+        )
+
+        connection.executemany(
+            """
+            INSERT INTO filename_terms
+            (filename, position, term)
+            VALUES (?, ?, ?)
+            """,
+            [
+                (filename, position, term)
+                for position, term in enumerate(expected)
+            ],
+        )
+
+        repaired.append(filename)
+
+    # Rows whose document no longer exists would never be reached above
+    # and would be served as phantom filename tokens.
+    orphans = sorted(set(stored) - {name for (name,) in documents})
+
+    for filename in orphans:
+        connection.execute(
+            "DELETE FROM filename_terms WHERE filename = ?",
+            (filename,),
+        )
+
+    return {
+        "schema_changed": schema_changed,
+        "documents": len(documents),
+        "repaired": repaired,
+        "orphans_removed": orphans,
+    }
 
 
 def count_documents(connection):
