@@ -454,6 +454,54 @@ backends. `RemoteBackend`'s vectors are checked against the live Flask API;
 `LocalBackend`'s against the ported engine. Same file, same expectations. That
 is the only cheap way to detect drift between modes.
 
+### 5.7 The index state model
+
+`READY` / `INDEXING` / `ERROR` is domain state owned by the engine
+(`search_engine/status.py`), not HTTP state. The Flask adapter renders it into
+`/api/status` and the rebuild endpoint; an Android UI renders the very same
+three values as a progress banner. Neither backend invents its own vocabulary,
+so `SearchBackend.status()` returns the same thing whichever implementation
+answered.
+
+| State | Meaning | Does search serve? |
+| --- | --- | --- |
+| `READY` | Searches are served from a complete snapshot | yes |
+| `INDEXING` | A rebuild is running; the **previous** snapshot still serves | yes |
+| `ERROR` | The last rebuild failed; `last_error` explains why | **yes** |
+
+The payload carries `state`, `message`, `started_at`, `completed_at`,
+`last_error` and `generation`. `generation` counts completed rebuilds, so a
+client can poll it to learn that a rebuild it triggered has finished instead of
+parsing message text.
+
+Two properties are load-bearing for Android and are tested rather than assumed,
+in `tests/test_search_engine_core.py`:
+
+**Status is never persisted.** Nothing about `INDEXING` or `ERROR` is written
+to SQLite or the JSON snapshot. That is what makes a crash mid-rebuild
+survivable: there is no stored "still indexing" flag for a restarted process to
+inherit. A process death during indexing — Android's most common way to kill a
+background task — therefore cannot wedge the app. On restart the engine loads
+its snapshot and reports `READY`. Persisting the status would turn a survivable
+interruption into a permanent one, so do not add it to the port.
+
+**`ERROR` describes the last rebuild, not the index.** Search keeps serving
+through it, because the snapshot that was active before the failure is still
+the one in memory. A UI that blocks results on `ERROR` would take the corpus
+down over a failed *background refresh*, which is the opposite of what the user
+needs. Show the error; keep serving.
+
+A rebuild builds the entire new snapshot and only then swaps the active
+pointer, so a failure partway through cannot expose a half-built index, and
+cannot corrupt what is on disk either. `INDEXING` is likewise not a degraded
+mode: the previous snapshot serves throughout.
+
+Scheduling is deliberately **not** in the core. The engine never creates a
+thread; `app.py` owns starting the background rebuild and catching its failure
+into `ERROR`. On Android that role belongs to coroutines on `Dispatchers.IO` or
+to `WorkManager` depending on task lifetime, and the engine port should stay
+free of both.
+
 ---
 
 ## 6. On-device storage
@@ -702,9 +750,95 @@ Contents (schema v1):
 - **`index`** — the resulting snapshot: `documents`, `filename_words`,
   `page_text`, `term_postings`. A port can load these directly and test ranking
   **without reimplementing extraction**, which is the point (§7).
-- **`cases`** — 45 named `(query, page, limit)` inputs with the exact expected
+- **`cases`** — 50 named `(query, page, limit)` inputs with the exact expected
   payload, including both response shapes and pagination clamping behaviour.
 - **`portability`** — the traps from §4, recorded next to the data.
+
+### What the vectors actually pin
+
+A contract is only as strong as the values it observes, so this one was
+measured rather than assumed:
+
+```bash
+.venv/bin/python tools/verify_vector_coverage.py
+```
+
+The tool enumerates every numeric literal in `search_engine/search.py` from the
+AST, perturbs one at a time, regenerates the vectors and compares. A constant
+whose perturbation moves any recorded payload is **pinned** — a port that gets
+it wrong fails the suite. Current result: **106 constants, 74 pinned, 32 not.**
+
+Enumeration is from the AST rather than a hand-written table, because the first
+hand-written sweep silently omitted `lexical_weight = 0.0` in three branches.
+All three are pinned; the list simply never mentioned them. The tool also
+encodes two traps that otherwise produce confident wrong answers: perturbations
+must be coarse enough to cross a clamp band (`0.25 → 0.26` reports the floor as
+pinned when nothing lands between them), and every regeneration runs with `-B`
+after purging `__pycache__`, because a same-size edit inside one wall-clock
+second is otherwise served from stale bytecode and reports a false negative.
+
+The 32 unpinned constants fall into four groups. The last one is the group a
+port implementer must read, because those numbers are live ranking behaviour
+that nothing verifies.
+
+**1. Not ranking values at all — 18.** Argument defaults (`requested_page=1`,
+`requested_limit=10`, which every case overrides explicitly), accumulator
+initialisers (`current_weight = 0.0`, `max_content_score = 0.0`,
+`best_prefix_similarity = 0.0`, `query_word_coverage = 0.0`), division guards
+(`if total_documents == 0`, `if total_words == 0`), the `or 0.0` defaults inside
+three `round()` calls, and the `== 0` tests in the filter that drops unscored
+documents.
+
+**2. Structurally dead — 3.** They cannot affect any output, whatever the
+corpus:
+
+| Constant | Why it has no effect |
+| --- | --- |
+| `filename_weight = 0.05` (quoted-only branch) | That branch is entered only when no document scored on the filename, which forces `filename_relevance` to `0.0` for every document. The weight multiplies zero. Confirmed by tracing both locals across all 50 cases. |
+| `filename_weight = 0.05` (ordinary branch) | Same argument, same branch condition. |
+| `final_score = 0.75` (filetype-only query) | A keep-alive, not a ranking value. Those queries publish a hardcoded `relevance_score` of `1.0`; `0.75` only has to be positive to clear the `final_score <= 0` filter. |
+
+Copy these faithfully anyway. They are dead because of a branch condition, and a
+port that restructures the branches could revive them.
+
+**3. Live constants pinned by engine tests instead — 3.** Real ranking values
+the six-document corpus cannot reach, so `tests/test_search_engine_core.py`
+holds them using terms built specifically to land on each:
+
+| Constant | Expression | Why the corpus misses it |
+| --- | --- | --- |
+| `0.25` | `min(0.90, max(0.25, len(word)/len(term)))` | Needs a term more than 4× the query word. |
+| `0.65` | `min(0.65, max(0.20, ratio * 0.70))` | Needs a numeric run filling ≥ 92.9% of a term. |
+| `0.70` | the multiplier in that same expression | The corpus's only numeric-substring query is `777` inside `unique777marker`, ratio 0.2, whose product 0.14 sits under the floor — so it reports 0.20 whatever the multiplier is. |
+
+Adding documents would have covered these, but it changes `total_documents`,
+which shifts IDF and rewrites every recorded content score. Trading a frozen
+contract for three constants is the wrong way round.
+
+**4. Live thresholds and ceilings the corpus cannot reach, with no engine test
+yet — 8. Copy these by inspection.** This is the residual risk in the contract
+and it is stated plainly rather than buried:
+
+| Line | Constant | What it governs | Why unreachable |
+| --- | --- | --- | --- |
+| 168 | `len(query) >= 2` | minimum length to treat a query as quoted | no 2-character quoted case |
+| 535 | `len(word) >= 3` | minimum word length for prefix matching | no case where moving the bound adds or drops a match |
+| 572 | `len(word) >= 2` | minimum digits for numeric substring | `777` has 3 digits; only a 2-digit query distinguishes 2 from 3, and the engine test for the numeric floor supplies one |
+| 790 | `phrase_occurrences <= 1` | single-occurrence phrase score of 50.0 | the repeated phrase occurs 3 times and singles occur once, so no document sits at exactly 2 |
+| 804 | `frequency_ratio` ceiling `1.0` | caps repetition bonus | needs `phrase_occurrences >= 25`; the maximum here is 3, giving ratio 0.341 |
+| 819 | `content_phrase_score` ceiling `100.0` | caps the phrase score | the maximum reached is `50 + 50*0.341 = 67.1` |
+| 1421 | `round(..., 4)` precision | rounding of one published field | that field is always exact at 4 decimals in these cases, so a 5th digit adds nothing |
+| 1451 | `round(..., 4)` precision | rounding of another published field | same reason |
+
+The five other `round(..., 4)` calls **are** pinned, which is the important part
+for §4.1: the vectors do detect a change to the rounding precision wherever a
+recorded value has a non-zero 5th digit. A port must still implement Python's
+`round()` semantics exactly (binary value, half-to-even) rather than decimal
+HALF_UP; the vectors expose that on those five fields.
+
+Group 4 is the honest answer to "what could a port get wrong and still pass?".
+Eight numbers, each with a stated reason, each worth an engine test if the port
+is going to depend on them rather than transcribe them.
 
 Absolute paths are written as `{{data_folder}}` so the file is meaningful
 outside this repository.
@@ -766,7 +900,7 @@ highest-risk items so a failure is discovered while it is still cheap.
    before proceeding, and against the sidecar's `expected` blocks, which give
    the same check over all 13 real documents rather than six synthetic ones.
 3. **Snapshot loading + `search()`.** Build engine state from the vectors'
-   `index` section (skipping extraction entirely) and make all 45 cases pass.
+   `index` section (skipping extraction entirely) and make all 50 cases pass.
    This proves ranking, rounding and pagination on real expectations.
 4. **Sidecar loader.** Read `artifacts/android/corpus_sidecar.json` from
    `assets/`, feed each document to the port of `index_extracted`, and confirm
@@ -807,12 +941,16 @@ corpus, and it needs no parser.
 ## Appendix: reproduction
 
 ```bash
-# The regression gate (235 tests: unit, core, live HTTP including invalid
+# The regression gate (253 tests: unit, core, live HTTP including invalid
 # input and access boundaries, parity tool, golden vectors, corpus sidecar)
 ./run_tests.sh
 
 # Regenerate the golden vectors
 .venv/bin/python tools/export_golden_vectors.py
+
+# Measure which ranking constants the vectors actually pin, and list every
+# one they cannot reach. Reports; does not gate. Takes ~20s.
+.venv/bin/python tools/verify_vector_coverage.py
 
 # Regenerate the pre-extracted corpus sidecar for offline Android
 .venv/bin/python tools/export_corpus_sidecar.py
