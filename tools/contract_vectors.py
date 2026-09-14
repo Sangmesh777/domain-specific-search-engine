@@ -80,6 +80,16 @@ CONTENT_TOKENIZE_INPUTS = [
     "ΣΣ",
     "",
     "   ",
+    # Supplementary-plane characters. Python counts characters, so a
+    # single U+20000 has length 1 and is dropped by the len>1 filter,
+    # while its UTF-16 length is 2. A port that uses String.length
+    # instead of a code point count will diverge here.
+    "\U00020000",
+    "\U00020000\U00020000",
+    "\U0001d7ce",
+    "\U0001d7ce\U0001d7ce",
+    "\U0001f600",
+    "\U0001f600\U0001f600",
 ]
 
 FILENAME_TOKENIZE_INPUTS = [
@@ -90,6 +100,9 @@ FILENAME_TOKENIZE_INPUTS = [
     "İstanbul",
     "BCS502 Module 2",
     "",
+    "\U00020000",
+    "\U00020000\U00020000",
+    "\U0001d7ce",
 ]
 
 SANITIZE_INPUTS = [
@@ -113,6 +126,26 @@ SANITIZE_INPUTS = [
     "archive.zip",
     "book.epub",
     "",
+    # Disallowed characters are removed, not replaced. Hyphen is in the
+    # allowed set [A-Za-z0-9_.-], and whitespace runs collapse to a
+    # single underscore.
+    "a!b.txt",
+    "file-name.txt",
+    "a+b.txt",
+    "a(b).txt",
+    "a@b.txt",
+    "a#b$c.txt",
+    "100%.txt",
+    "a___b.txt",
+    "__lead.txt",
+    "trail__.txt",
+    "-lead.txt",
+    "._.txt",
+    "a  b.txt",
+    "a\tb.txt",
+    "a\nb.txt",
+    "...a..b...txt",
+    "MiXeD CaSe.TXT",
 ]
 
 # Python round() on a binary64 value is correctly-rounded decimal
@@ -176,6 +209,8 @@ def build_contract_vectors(engine):
     return {
         "notes": [
             "These vectors pin Unicode, rounding and sanitizer semantics.",
+            "Token length is measured in characters (code points), not",
+            "UTF-16 units: Python drops a single U+20000 but keeps two.",
             "The Kotlin port must reproduce every expected value exactly.",
             "Expected values were produced by the Python engine itself.",
         ],
