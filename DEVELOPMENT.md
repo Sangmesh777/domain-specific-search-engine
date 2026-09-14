@@ -30,7 +30,8 @@ so it must be set **before** `app.py` is imported.
 python3 -m pytest -q        # suite only
 ```
 
-`./run_tests.sh` runs four gates in order: byte-compile, golden vectors,
+`./run_tests.sh` runs seven gates in order: byte-compile, golden vectors,
+shadow parity, mutation equivalence, storage reconstruction parity,
 sidecar integrity, then pytest. Any failure exits non-zero.
 
 ### Two classes of test
@@ -39,11 +40,17 @@ sidecar integrity, then pytest. Any failure exits non-zero.
 directory. They need nothing running:
 
 ```text
-tests/test_tokenizer_contract.py   72  Unicode, sanitizer, query parsing
-tests/test_golden_artifacts.py     19  Artifact integrity and drift
-tests/test_restart_recovery.py     16  Restart, bulk delete, rebuild
-tests/test_port_model.py            6  Kotlin port algorithms
-tests/test_golden_vectors.py        2  Full 79-vector replay
+tests/test_tokenizer_contract.py        72  Unicode, sanitizer, query parsing
+tests/test_storage_parity.py            28  The storage layer's separation
+tests/test_index_state.py               25  Ownership and atomic publication
+tests/test_filename_order_persistence.py 23  Filename order across a restart
+tests/test_memory_mutation_atomicity.py 20  Copy-on-write, torn reads
+tests/test_golden_artifacts.py          19  Artifact integrity and drift
+tests/test_restart_recovery.py          16  Restart, bulk delete, rebuild
+tests/test_jvm_semantics.py              7  JVM semantics for the Kotlin port
+tests/test_port_model.py                 6  Kotlin port algorithms
+tests/test_shadow_parity.py              3  Extraction coverage guard
+tests/test_golden_vectors.py             2  Full 79-vector replay
 ```
 
 **Live.** `tests/test_phase12_live.py` drives a real HTTP server on
@@ -52,8 +59,8 @@ tests/test_golden_vectors.py        2  Full 79-vector replay
 when nothing is listening:
 
 ```text
-with a server     : 118 passed
-without a server  : 109 passed, 9 skipped
+with a server     : 230 passed
+without a server  : 221 passed, 9 skipped
 ```
 
 ## Architecture
@@ -382,7 +389,7 @@ Negative controls, all observed:
 
 | Break | Result |
 | --- | --- |
-| 11 in-process corruptions (dropped term, changed count, dropped document, reordered filename tokens, changed page text, changed/dropped/reordered SQLite rows, changed schema, removed snapshot file, changed action log) | all 11 reported |
+| 13 in-process corruptions (dropped term, changed count, dropped document, reordered filename tokens, changed page text, changed/dropped/reordered SQLite rows, changed schema, changed/dropped `filename_terms` content, removed snapshot file, changed action log) | all 13 reported |
 | `ORDER BY filename, rowid` -> `ORDER BY filename, term` | `order-sensitive-filenames/reconstruct: filename_index differs` |
 | `term_count` read as `term_count + 1` | `reconstruct: inverted_index differs` |
 | `total_words` and `page_count` swapped in the SELECT | `reconstruct: document_metadata differs` |
@@ -393,17 +400,19 @@ both cases the control was wrong rather than the tool: one patch matched
 the schema comment instead of the SQL, and one "reorder" replaced a
 one-element list with itself. Both were fixed before being believed.
 
-### Open finding: filename token order does not survive a restart
+### Fixed: filename token order now survives a restart
 
-This is pre-existing, reproduced identically on the monolith, and
-**ranking-visible**. It is not caused by the extraction, and it is not
-fixed here because this phase preserves behaviour.
+Pre-existing, reproduced identically on the monolith, and
+**ranking-visible**. Found while proving the reconstructed index against
+the monolith, then fixed as its own milestone before the incremental
+write paths were extracted, because the defect lived in exactly those two
+functions.
 
-`sync_sqlite_from_memory` and `incrementally_index_document` both write
-`filename_terms` from `set(filename_words)`, so the persisted row order
-is set-iteration order. `load_database_from_sqlite` reads it back with
-`ORDER BY filename, rowid`. The sequence that was live before a restart
-is therefore not the sequence that comes back.
+`sync_sqlite_from_memory` and `incrementally_index_document` both wrote
+`filename_terms` from `set(filename_words)` under a
+`PRIMARY KEY (filename, term)` with `INSERT OR IGNORE`, so the persisted
+data lost **both** the token order and repeated tokens.
+`load_database_from_sqlite` read it back with `ORDER BY filename, rowid`.
 
 That matters because `execute_search` builds
 
@@ -419,20 +428,90 @@ filename, with the content deliberately unrelated:
 
 ```text
 before restart   "network security notes" -> ['network security notes.txt']
-after  restart   "network security notes" -> []
+after  restart   "network security notes" -> []      # monolith
+after  restart   "network security notes" -> ['network security notes.txt']  # fixed
 ```
 
 Reproduced on 6/6 hash seeds for the extracted engine and 3/3 for the
-monolith at `18429c2`. In the current corpus 6 of the 13 documents are
+monolith at `18429c2`. In the live corpus **5 of the 13 documents** were
 stored in a scrambled order; the breakage is usually masked because the
-phrase also appears in the document's content, which is why it has gone
+phrase also appears in the document's content, which is why it went
 unnoticed.
 
-**Required next phase**: make the filename token order round-trip.
-The minimal change is to persist the tokens in their natural order
-(drop `set(...)`, or add an explicit ordinal column) and to keep the
-reader's `ORDER BY` consistent with the writer. It needs its own parity
-run, because it changes stored data.
+**Fix.** `filename_terms` gained an explicit ordinal, matching the
+Android specification's `(document, position, token)` model:
+
+```sql
+filename_terms(filename TEXT, position INTEGER NOT NULL, term TEXT,
+               PRIMARY KEY (filename, position))
+```
+
+Both writers now iterate `enumerate(filename_words)` - every occurrence,
+in natural order - and the reader orders by `filename, position`.
+
+**Existing data.** `storage.migrate_filename_terms()` runs once at
+startup, immediately after `create_schema()`. It recreates the table when
+`position` is missing, deletes orphan rows, and rewrites any document
+whose stored term sequence differs from
+`tokenize_filename(os.path.splitext(filename)[0])`. It reports
+`schema_changed`, `documents`, `repaired` and `orphans_removed`, and
+prints nothing when the database is already correct, so a healthy
+database pays nothing per start.
+
+The live database was migrated with it: before, columns
+`['filename', 'term']` with 5/13 documents scrambled; the first start
+reported `schema_changed=True, repaired=13, orphans_removed=0`; the
+second start was silent; after, 0/13 scrambled, 33 rows, primary key
+`(filename, position)`.
+
+Because the repair runs before anything reads the table, a database
+written by the buggy code self-heals on the first start against the new
+build. It also means **end-to-end restart tests are structurally unable
+to police the writers** - the repair sanitises whatever they wrote. The
+tests that have teeth are the writer-level SQLite inspections and
+`test_the_reader_follows_position_not_rowid`; see "Negative controls"
+below.
+
+Storage parity keeps the strict comparison for SQLite content and for
+ingest, and relaxes exactly one field (`filename_index` on the
+reconstruction comparison) with the divergence counted and printed per
+document. 44 documents across the 7 fixtures diverge there, which *is*
+the fix; everything else still compares byte for byte.
+
+`tools/storage_equivalence.py --negative-control` now also corrupts the
+exempted table directly (a changed token value, a dropped row) and
+requires both to be reported, so the exemption cannot widen into a hole.
+
+#### Negative controls
+
+`tests/test_filename_order_persistence.py` is 23 tests. Five deliberate
+breaks were applied to the shipped code and the observed failures
+recorded:
+
+| Break | Observed failure |
+| --- | --- |
+| writer iterates `set(filename_words)` | 4 failed, incl. `test_positions_are_contiguous_and_unique` |
+| writer dedupes with `dict.fromkeys` | 1 failed (repeated filename token collapsed) |
+| reader orders by `filename, rowid` | `test_the_reader_follows_position_not_rowid` |
+| repair refuses to rewrite anything | `test_an_already_corrupted_database_is_repaired` |
+| repair derives the expected order reversed | 9 failed |
+
+Three of those breaks - both writers and the reader - were applied
+**before** the reader test existed, and all three passed the suite. The
+reason is worth keeping: the startup repair rewrites the rows before
+anything reads them, so every restart-based assertion sees repaired,
+correct data no matter what the writer did. A green restart test here is
+evidence about the repair, not about the writer. That is exactly the
+case a negative control exists to catch, and it is why the file also
+inspects the table directly and why
+`test_the_reader_follows_position_not_rowid` inserts rows *out of rowid
+order*: written in order, `ORDER BY rowid` and `ORDER BY position` agree,
+so only an out-of-order insert makes the difference observable.
+
+Two of the five controls were themselves wrong on the first attempt (a
+patch that matched the module docstring instead of the SQL, and one that
+was a no-op on the tested path). Both were corrected before the table
+above was recorded.
 
 ### Remaining extraction surface (measured)
 

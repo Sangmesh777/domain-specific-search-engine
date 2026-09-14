@@ -444,6 +444,29 @@ def initialize_sqlite_store():
             connection
         )
 
+        # Repair databases written before filename_terms carried an
+        # explicit position. The correct token sequence is derivable
+        # from the document name, so this needs no document re-reading
+        # and is a no-op once the table is correct.
+        filename_term_migration = storage.migrate_filename_terms(
+            connection,
+            tokenize_filename=tokenize_filename,
+        )
+
+        if (
+            filename_term_migration["schema_changed"]
+            or filename_term_migration["repaired"]
+            or filename_term_migration["orphans_removed"]
+        ):
+            print(
+                "[DATABASE] filename_terms migrated: "
+                f"schema_changed="
+                f"{filename_term_migration['schema_changed']}, "
+                f"repaired={len(filename_term_migration['repaired'])}, "
+                f"orphans_removed="
+                f"{len(filename_term_migration['orphans_removed'])}"
+            )
+
         if (
             storage.count_documents(connection) == 0
             and DOCUMENT_METADATA
@@ -730,18 +753,28 @@ def incrementally_index_document(
             ],
         )
 
+        # Every occurrence, in order, with its position.
+        #
+        # This used to be `set(filename_words)` under a (filename, term)
+        # primary key, which lost the token order (set iteration order
+        # decided it) and collapsed repeated tokens. Both changed
+        # `normalized_filename` after a restart, so quoted filename
+        # phrases stopped matching. The rows for this document were
+        # deleted above, so this is a clean rewrite.
         connection.executemany(
             """
-            INSERT OR IGNORE INTO filename_terms
-            (filename, term)
-            VALUES (?, ?)
+            INSERT INTO filename_terms
+            (filename, position, term)
+            VALUES (?, ?, ?)
             """,
             [
                 (
                     filename,
+                    position,
                     term,
                 )
-                for term in set(filename_words)
+                for position, term
+                in enumerate(filename_words)
             ],
         )
 

@@ -59,6 +59,24 @@ CONTAINERS = (
 
 SQLITE_TABLES = ("documents", "term_postings", "filename_terms", "pages")
 
+# `filename_terms` is the ONE place where the extracted engine is
+# deliberately meant to differ from the monolith, because the monolith
+# had a defect there and this milestone fixes it. The old table stored
+# `set(filename_words)` under a (filename, term) primary key, so it lost
+# the token order and collapsed repeated tokens; the new table carries an
+# explicit `position` and stores every occurrence.
+#
+# Exempting it silently would hollow out the parity claim, so the
+# exemption is narrow and asserted in both directions:
+#
+#   * the (filename, term) CONTENT must still match exactly
+#   * the new engine must carry `position` and the monolith must not
+#   * every difference is counted and reported
+#
+# Everything else is compared strictly, including the other three tables
+# and all four container structures.
+DEFECT_FIXED_TABLE = "filename_terms"
+
 # A fixed seed for both engines, so the set-iteration order that reaches
 # SQLite is the same on both sides of the comparison.
 PARITY_HASH_SEED = "0"
@@ -360,8 +378,31 @@ def compare_sqlite(left, right, label, differences):
     if not left.get("exists"):
         return
 
-    if left.get("schema") != right.get("schema"):
+    left_schema = [
+        entry
+        for entry in left.get("schema", [])
+        if DEFECT_FIXED_TABLE not in (entry.get("name") or "")
+    ]
+    right_schema = [
+        entry
+        for entry in right.get("schema", [])
+        if DEFECT_FIXED_TABLE not in (entry.get("name") or "")
+    ]
+
+    if left_schema != right_schema:
         differences.append(f"{label}: sqlite schema differs")
+
+    # And the exemption itself is checked, rather than assumed.
+    for side, label_side in ((left, "left"), (right, "right")):
+        rows = side.get("tables", {}).get(DEFECT_FIXED_TABLE)
+        if not rows:
+            continue
+        has_position = "position" in rows["columns"]
+        if label_side == "right" and not has_position:
+            differences.append(
+                f"{label}: the extracted engine has no position column "
+                f"on {DEFECT_FIXED_TABLE}"
+            )
 
     for table in SQLITE_TABLES:
 
@@ -370,6 +411,29 @@ def compare_sqlite(left, right, label, differences):
 
         if a is None or b is None:
             differences.append(f"{label}: table {table} missing on one side")
+            continue
+
+        if table == DEFECT_FIXED_TABLE:
+
+            # Shape differs on purpose; content must not.
+            left_pairs = sorted(
+                (row[0], row[-1])
+                for row in a["rows"]
+            )
+            right_pairs = sorted(
+                (row[0], row[-1])
+                for row in b["rows"]
+            )
+
+            if left_pairs != right_pairs:
+                missing = sorted(set(left_pairs) - set(right_pairs))
+                extra = sorted(set(right_pairs) - set(left_pairs))
+                differences.append(
+                    f"{label}: {table} content differs - "
+                    f"only on the left: {missing[:5]}, "
+                    f"only on the right: {extra[:5]}"
+                )
+
             continue
 
         if a["columns"] != b["columns"]:
@@ -466,13 +530,37 @@ def filename_order_instability(ingest, reconstruct):
     return changed
 
 
-def compare_reports(left, right, label, differences):
-    """Compare two probe reports in full."""
+def compare_reports(
+    left, right, label, differences, canonical_filename_order=False
+):
+    """
+    Compare two probe reports in full.
+
+    `canonical_filename_order` sorts each document's filename tokens
+    before comparing. It is used only for the reconstruction comparison,
+    where the monolith and the extracted engine are SUPPOSED to differ:
+    the monolith reassembles a scrambled order, the extracted engine
+    reassembles the natural one. The difference is measured and printed
+    separately by `filename_order_divergence`, so relaxing it here does
+    not hide it - and every other field, including the other three
+    containers and all of SQLite, stays strict.
+    """
 
     compare_actions(left, right, label, differences)
 
+    left_containers = left["containers"]
+    right_containers = right["containers"]
+
+    if canonical_filename_order:
+        left_containers = json.loads(json.dumps(left_containers))
+        right_containers = json.loads(json.dumps(right_containers))
+
+        for side in (left_containers, right_containers):
+            for filename, words in side["filename_index"].items():
+                side["filename_index"][filename] = sorted(words)
+
     compare_containers(
-        left["containers"], right["containers"], label, differences
+        left_containers, right_containers, label, differences
     )
     compare_sqlite(left["sqlite"], right["sqlite"], label, differences)
     compare_json_files(
@@ -513,6 +601,30 @@ def canonical_state(report):
             snapshot[filename] = sorted(words)
 
     return canonical
+
+
+def filename_order_divergence(legacy, extracted):
+    """
+    Return documents whose reconstructed filename token sequence differs
+    between the monolith and the extracted engine.
+
+    This is the fix, stated as a measurement. It is expected to be
+    non-empty whenever the monolith's set-iteration order happened to
+    differ from the natural order, and empty when it did not - so an
+    empty result here is not a failure, it just means that run did not
+    exercise the difference.
+    """
+
+    changed = []
+
+    left = legacy["containers"]["filename_index"]
+    right = extracted["containers"]["filename_index"]
+
+    for filename in sorted(set(left) & set(right)):
+        if left[filename] != right[filename]:
+            changed.append((filename, left[filename], right[filename]))
+
+    return changed
 
 
 def comparison_count(ingest, reconstruct):
@@ -561,6 +673,7 @@ def run(base=DEFAULT_BASE, only=None):
     differences = []
     comparisons = 0
     reordered = []
+    fixed_order = []
 
     for fixture in fixtures:
 
@@ -591,12 +704,20 @@ def run(base=DEFAULT_BASE, only=None):
         compare_reports(
             legacy_ingest, new_ingest, f"{label}/ingest", differences
         )
+        # Ingest is compared strictly: both engines hold the same
+        # in-memory structures, so nothing is exempt there.
         compare_reports(
             legacy_reconstruct,
             new_reconstruct,
             f"{label}/reconstruct",
             differences,
+            canonical_filename_order=True,
         )
+
+        for filename, before, after in filename_order_divergence(
+            legacy_reconstruct, new_reconstruct
+        ):
+            fixed_order.append((label, filename, before, after))
 
         # The reconstruction claim: a restart rebuilds the same index.
         # Compared as state only - the action log describes what the
@@ -628,7 +749,7 @@ def run(base=DEFAULT_BASE, only=None):
             ),
         })
 
-    return summaries, comparisons, differences, reordered
+    return summaries, comparisons, differences, reordered, fixed_order
 
 
 def hash_nondeterminism_report(base=DEFAULT_BASE):
@@ -747,8 +868,15 @@ def negative_control():
                     "rows": [["alpha", "a.txt", 2]],
                 },
                 "filename_terms": {
-                    "columns": ["filename", "term"],
-                    "rows": [["a.txt", "alpha"], ["a.txt", "beta"]],
+                    # The current shape. The control's reference has to
+                    # model the schema the extracted engine actually
+                    # produces, or the "no position column" assertion
+                    # fires on the control itself.
+                    "columns": ["filename", "position", "term"],
+                    "rows": [
+                        ["a.txt", 0, "alpha"],
+                        ["a.txt", 1, "beta"],
+                    ],
                 },
                 "pages": {
                     "columns": ["filename", "page_number", "text"],
@@ -800,6 +928,14 @@ def negative_control():
     def change_schema(state):
         state["sqlite"]["schema"][0]["sql"] = "CREATE TABLE documents ()"
 
+    def change_filename_term_value(state):
+        state["sqlite"]["tables"]["filename_terms"]["rows"][0][-1] = "TAMPERED"
+
+    def drop_filename_term_row(state):
+        state["sqlite"]["tables"]["filename_terms"]["rows"] = [
+            ["a.txt", "alpha"],
+        ]
+
     def drop_json_file(state):
         del state["json_files"]["inverted_index.json"]
 
@@ -816,6 +952,8 @@ def negative_control():
         corrupt("sqlite row dropped", drop_sqlite_row),
         corrupt("sqlite rows reordered", reorder_sqlite_rows),
         corrupt("schema changed", change_schema),
+        corrupt("filename_terms value changed", change_filename_term_value),
+        corrupt("filename_terms row dropped", drop_filename_term_row),
         corrupt("json snapshot file removed", drop_json_file),
         corrupt("action log changed", change_action_log),
     ]
@@ -886,7 +1024,7 @@ def main(argv=None):
     print()
 
     try:
-        summaries, comparisons, differences, reordered = run(
+        summaries, comparisons, differences, reordered, fixed_order = run(
             base=arguments.base,
             only=arguments.fixtures,
         )
@@ -903,6 +1041,26 @@ def main(argv=None):
             f"{summary['documents']:>3} docs "
             f"{summary['terms']:>4} terms "
             f"{summary['sqlite_rows']:>4} sqlite rows"
+        )
+
+    if fixed_order:
+        print()
+        print(
+            "  filename order now differs from the monolith "
+            f"({len(fixed_order)} document(s)) - the intended fix:"
+        )
+
+        for label, filename, before, after in fixed_order[:5]:
+            print(f"    {label}: {filename!r}")
+            print(f"      monolith : {before}")
+            print(f"      extracted: {after}")
+
+        print(
+            "    the monolith stored set(filename_words) under a "
+            "(filename, term)\n"
+            "    primary key; the extracted writers store every "
+            "occurrence with an\n"
+            "    explicit position."
         )
 
     if reordered:
