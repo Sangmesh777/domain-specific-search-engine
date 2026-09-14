@@ -1828,6 +1828,202 @@ def test_deletion_survives_restart(engine, tmp_path):
     assert_consistent(reopened)
 
 
+# ------------------------------------------------------------
+# CRASH AND FAILURE RECOVERY
+# ------------------------------------------------------------
+#
+# A rebuild builds the whole new snapshot and only then swaps the active
+# pointer, so a failure partway through cannot expose a half-built index.
+# These tests drive that failure for real rather than reading the code: they
+# make the snapshot builder raise, and check what still serves afterwards.
+#
+# Index status is deliberately in-memory only, so nothing about INDEXING or
+# ERROR is written to SQLite or the JSON snapshot. That is what makes a crash
+# mid-rebuild survivable: there is no persisted "still indexing" flag for a
+# restarted process to inherit and get stuck on. The tests below assert that
+# property, because it is load-bearing for the Android UI in exactly the same
+# way - a process death during indexing must not wedge the app.
+
+def test_a_failed_rebuild_leaves_the_previous_snapshot_serving(
+    engine,
+    tmp_path,
+    monkeypatch,
+):
+    """
+    A rebuild that raises must leave the corpus exactly as searchable as it
+    was, not blank it and not half-replace it.
+    """
+
+    from search_engine import engine as engine_module
+
+    engine.import_paths(
+        sample_corpus(tmp_path),
+        log=lambda *args: None,
+    )
+
+    before = engine.counts()
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("simulated crash mid-rebuild")
+
+    monkeypatch.setattr(
+        engine_module,
+        "build_snapshot_from_folder",
+        explode,
+    )
+
+    with pytest.raises(RuntimeError):
+        engine.rebuild(log=lambda *args: None)
+
+    # The active snapshot is the one from before the failed rebuild.
+    assert engine.counts() == before
+
+    page = engine.search("firewalls")
+
+    results = page["results"] if isinstance(page, dict) else page
+
+    assert results, "search stopped working after a failed rebuild"
+
+    assert_consistent(engine)
+
+
+def test_a_failed_rebuild_does_not_corrupt_the_persisted_snapshot(
+    engine,
+    tmp_path,
+    monkeypatch,
+):
+    """
+    The failure must not reach disk either: a restart after a crashed rebuild
+    has to come back with the corpus that was there before it.
+    """
+
+    from search_engine import engine as engine_module
+
+    engine.import_paths(
+        sample_corpus(tmp_path),
+        log=lambda *args: None,
+    )
+
+    before = engine.counts()
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("simulated crash mid-rebuild")
+
+    monkeypatch.setattr(
+        engine_module,
+        "build_snapshot_from_folder",
+        explode,
+    )
+
+    with pytest.raises(RuntimeError):
+        engine.rebuild(log=lambda *args: None)
+
+    reopened = SearchEngine(engine.config)
+
+    assert reopened.counts() == before
+
+    assert_consistent(reopened)
+
+
+def test_indexing_status_does_not_survive_a_restart(engine, tmp_path):
+    """
+    A process that dies while a rebuild is in flight leaves no trace of it.
+
+    Status is in-memory, so the restarted engine reports READY and serves the
+    corpus. Were INDEXING persisted, a crash mid-rebuild would wedge every
+    later start into reporting an index that never finishes.
+    """
+
+    engine.import_paths(
+        sample_corpus(tmp_path),
+        log=lambda *args: None,
+    )
+
+    engine.set_index_status(
+        "INDEXING",
+        "Rebuilding search index in background...",
+        started_at=1.0,
+    )
+
+    assert engine.index_status()["state"] == "INDEXING"
+
+    reopened = SearchEngine(engine.config)
+
+    assert reopened.index_status()["state"] == "READY"
+
+    assert reopened.counts() == engine.counts()
+
+    page = reopened.search("firewalls")
+
+    results = page["results"] if isinstance(page, dict) else page
+
+    assert results
+
+    assert_consistent(reopened)
+
+
+def test_an_error_status_still_serves_the_corpus(engine, tmp_path):
+    """
+    ERROR describes the last rebuild, not the index. Search must keep working
+    through it, because the snapshot that was serving before the failure is
+    still the one in memory - and a UI that blocks on ERROR would take the
+    corpus down over a failed background refresh.
+    """
+
+    engine.import_paths(
+        sample_corpus(tmp_path),
+        log=lambda *args: None,
+    )
+
+    engine.set_index_status(
+        "ERROR",
+        "Rebuild failed.",
+        last_error="simulated crash mid-rebuild",
+    )
+
+    status = engine.index_status()
+
+    assert status["state"] == "ERROR"
+    assert status["last_error"] == "simulated crash mid-rebuild"
+
+    page = engine.search("firewalls")
+
+    results = page["results"] if isinstance(page, dict) else page
+
+    assert results, "an ERROR status must not stop search serving"
+
+    assert engine.counts()["documents"] == 3
+
+    assert_consistent(engine)
+
+
+def test_a_restart_after_an_error_reports_ready_again(engine, tmp_path):
+    """
+    ERROR is not sticky across a restart either, so a failed background
+    rebuild cannot leave the app permanently reporting a broken index.
+    """
+
+    engine.import_paths(
+        sample_corpus(tmp_path),
+        log=lambda *args: None,
+    )
+
+    engine.set_index_status(
+        "ERROR",
+        "Rebuild failed.",
+        last_error="simulated crash mid-rebuild",
+    )
+
+    reopened = SearchEngine(engine.config)
+
+    status = reopened.index_status()
+
+    assert status["state"] == "READY"
+    assert status["last_error"] is None
+
+    assert_consistent(reopened)
+
+
 # ============================================================
 # STATUS
 # ============================================================
@@ -3076,6 +3272,156 @@ def test_rebuild_ranks_ties_in_filename_order(engine, tmp_path):
     ]
 
     assert_consistent(engine)
+
+
+# ============================================================
+# SIMILARITY CLAMPS THE GOLDEN VECTORS CANNOT REACH
+# ============================================================
+#
+# tests/golden/search_engine_vectors.json is the portability contract. A
+# perturbation sweep of every ranking constant in search.py - alter one
+# constant, regenerate, compare - measures how much of the ranking it
+# actually pins: 20 of the 26 change at least one recorded payload. The six
+# that do not are each accounted for, and three of them are pinned here.
+#
+# Structurally dead, so no corpus could ever pin them:
+#
+#   filename_weight 0.05 in the quoted-only and ordinary branches. Both are
+#   entered only when no document scored on the filename, which forces
+#   filename_relevance to 0.0 for every document, so the weight multiplies
+#   zero. Confirmed by tracing those two locals across all 50 recorded cases.
+#
+#   final_score = 0.75 for a filetype-only query. A keep-alive, not a ranking
+#   constant: those queries publish a hardcoded relevance_score of 1.0, and
+#   0.75 only has to be positive to clear the `final_score <= 0` filter.
+#
+# Live ranking constants that a six-document corpus happens not to reach, and
+# which are therefore pinned below with terms built to land on them:
+#
+#   prefix similarity floor      min(0.90, max(0.25, len(word)/len(term)))
+#   numeric similarity ceiling   min(0.65, max(0.20, ratio * 0.70))
+#   numeric similarity factor    the 0.70 in that same expression
+#
+# The prefix ceiling 0.90 is pinned by the vectors themselves, through three
+# cases added for exactly that reason.
+#
+# These do hardcode values, which the SEARCH section otherwise avoids on the
+# grounds that tuned scores belong to the vectors and the parity tool. That
+# reasoning does not apply here: no other artifact in the repository observes
+# these three numbers, so this is the only place a regression or a wrong port
+# could be caught.
+#
+# The contrast cases matter as much as the clamped ones. Asserting only that
+# a query yields 0.25 would also pass if the expression collapsed to a
+# constant, so each clamp is paired with a nearby query that lands inside the
+# unclamped range.
+
+CLAMP_TEXT = "internationalization x12345678901234 abc12345def"
+
+
+def make_clamp_engine(engine):
+    """
+    An engine whose only terms are built to reach each similarity clamp.
+
+        internationalization  20 chars, so a 4-char prefix is a 0.20 ratio
+        x12345678901234       15 chars with a 14-char numeric run inside it,
+                              not at the start, for a 0.9333 ratio
+        abc12345def           11 chars with a 5-char numeric run in the
+                              middle, for a 0.4545 ratio
+    """
+
+    engine.index_extracted(
+        "clamps.txt",
+        CLAMP_TEXT,
+        [{"page": 1, "text": CLAMP_TEXT}],
+    )
+
+    return engine
+
+
+def clamp_result(engine, query):
+    """The single ranked row a clamp-corpus query produces."""
+
+    page = engine.search(query)
+
+    rows = page["results"] if isinstance(page, dict) else page
+
+    assert rows, f"{query!r} should have matched the clamp corpus"
+
+    return rows[0]
+
+
+def test_prefix_similarity_floor_is_pinned(engine):
+    """
+    "inte" is 4 of the 20 characters in "internationalization", a ratio of
+    0.20, which the floor raises to 0.25.
+    """
+
+    make_clamp_engine(engine)
+
+    assert clamp_result(engine, "inte")["prefix_similarity"] == 0.25
+
+
+def test_prefix_similarity_inside_the_range_is_not_clamped(engine):
+    """
+    The contrast case: "internat" is 8 of 20, a ratio of 0.4, comfortably
+    between the 0.25 floor and the 0.90 ceiling, so it passes through
+    unchanged. Without this the test above would also pass if prefix
+    similarity had collapsed to a constant 0.25.
+    """
+
+    make_clamp_engine(engine)
+
+    assert clamp_result(engine, "internat")["prefix_similarity"] == 0.4
+
+
+def test_numeric_similarity_ceiling_is_pinned(engine):
+    """
+    "12345678901234" is a 14-character numeric run inside the 15-character
+    term "x12345678901234", and it is not a prefix of it, so it takes the
+    numeric-substring branch. The ratio 14/15 = 0.9333 times 0.70 is 0.6533,
+    which the ceiling caps at 0.65.
+    """
+
+    make_clamp_engine(engine)
+
+    assert clamp_result(engine, "12345678901234")["numeric_similarity"] == 0.65
+
+
+def test_numeric_similarity_multiplier_is_pinned(engine):
+    """
+    "12345" is 5 of the 11 characters of "abc12345def", a ratio of 0.4545.
+    Multiplied by 0.70 that is 0.318181..., which rounds to 0.3182 and sits
+    strictly between the 0.20 floor and the 0.65 ceiling, so the multiplier
+    itself is what this value reports.
+
+    This is the case the vectors cannot reach: their only numeric-substring
+    query is "777" inside "unique777marker", a ratio of 0.2, whose product
+    0.14 is below the floor and so reports 0.20 whatever the multiplier is.
+    """
+
+    make_clamp_engine(engine)
+
+    assert clamp_result(engine, "12345")["numeric_similarity"] == 0.3182
+
+
+def test_numeric_similarity_floor_is_pinned(engine):
+    """
+    The floor the multiplier test depends on, asserted directly: a numeric
+    run short enough that ratio * 0.70 falls under 0.20 reports 0.20.
+    """
+
+    # The numeric-substring branch needs at least two digits, and the run
+    # must not start the term, so "12" sits at the end of a longer word.
+    engine.index_extracted(
+        "floors.txt",
+        "abcdefghij12",
+        [{"page": 1, "text": "abcdefghij12"}],
+    )
+
+    # 2 of 12 characters is a 0.1667 ratio; 0.1667 * 0.70 = 0.1167, which is
+    # under the floor, so 0.20 is reported.
+    assert clamp_result(engine, "12")["numeric_similarity"] == 0.2
 
 
 def test_search_after_restart_matches_search_before_it(
