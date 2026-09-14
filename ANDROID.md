@@ -73,8 +73,8 @@ Checked in the authoring environment:
 
 | Requirement | Result |
 | --- | --- |
-| `java -version` | **not found** |
-| `javac -version` | **not found** |
+| `java -version` | **available via PyPI** (`jdk4py`, Temurin 25.0.2 JRE) |
+| `javac -version` | **not found** — the JDK packaging ships a JRE only |
 | `gradle --version` | **not found** |
 | `adb version` | **not found** |
 | `ANDROID_HOME` / `ANDROID_SDK_ROOT` | **unset** |
@@ -88,7 +88,13 @@ Checked in the authoring environment:
 | `release-assets.githubusercontent.com` | **blocked** |
 
 Reachable hosts: `pypi.org`, `github.com` (API/HTTPS only, not release
-assets), `registry.npmjs.org`.
+assets), `registry.npmjs.org`. Maven Central and every known mirror are
+also blocked, so a Kotlin compiler or Android Gradle Plugin cannot be
+fetched by any route.
+
+A JVM *is* reachable through PyPI (`jdk4py` ships a Temurin JRE), which
+is why the Java semantics in section 5.1.1 could be measured on real
+hardware rather than modelled. But that package contains no compiler.
 
 Because the Android SDK and the Android Gradle Plugin cannot be
 downloaded, **an APK cannot be built here**. This is the single blocker
@@ -265,6 +271,55 @@ fun isPythonAlnum(c: Int): Boolean =
     Character.getType(c) == Character.LETTER_NUMBER.toInt() ||
     Character.getType(c) == Character.OTHER_NUMBER.toInt()
 ```
+
+### 5.1.1 Measured, not assumed
+
+An earlier version of this document asserted that the predicate above
+matched Python with zero differences across all code points. That claim
+was produced by modelling Java's categories *from Python's own Unicode
+tables*, which is circular and could only ever confirm itself.
+
+`tools/verify_jvm_semantics.py` now executes the real
+`java.lang.Character` methods. Run against Temurin 25.0.2 (Unicode 16)
+and Python 3.11 (Unicode 14.0.0):
+
+| Check | Result |
+| --- | --- |
+| Code points swept | 1,112,064 |
+| Alphanumeric differences | 9,392 |
+| ... of those, explained by Unicode version skew | **9,392 (all)** |
+| ... genuine divergences | **0** |
+| Whitespace divergences | **0** |
+| Lowercase divergences, BMP | 6 (version skew) + U+FEFF |
+| Rounding comparisons / mismatches | 24,102 / **0** |
+
+So the *predicate composition* is correct, and every remaining
+difference is a code point unassigned in Unicode 14 but assigned in
+Unicode 16.
+
+**This is not fixable and not a porting defect.** It depends on the
+runtime: Python 3.11 ships Unicode 14, JDK 25 ships Unicode 16, and
+Android's ART ships a third version again. A document containing a
+character assigned after Unicode 14 can therefore tokenize differently
+on different runtimes.
+
+Practical consequences:
+
+* The shipped contract vectors use characters assigned well before
+  Unicode 14, so they are portable and must pass everywhere.
+* Do not add non-BMP or recently-assigned characters to the golden
+  corpus expecting cross-platform stability.
+* U+FEFF is stripped by Java's `toLowerCase(Locale.ROOT)`. It is
+  neither alphanumeric nor whitespace under either language, so it
+  becomes a separator in both and cannot change a token. Recorded, not
+  ignored, so a future change is noticed.
+
+The sweep in `tools/verify_jvm_semantics.py` covers the BMP only for
+lowercasing, because pyjnius cannot reliably marshal supplementary-plane
+strings between Python and the JVM. That is a limitation of the *bridge*,
+not of Java: the compiled JUnit tests run inside the JVM and do not
+round-trip strings through JNI, so they can verify the supplementary
+planes exactly.
 
 **3. `isspace()`.** Java splits whitespace into two predicates and
 Python's set is different from both.
