@@ -27,6 +27,28 @@ Java predicate semantics are modelled from the Unicode general category:
     Character.isWhitespace(c) category in {"Zs","Zl","Zp"} except the
                               non-breaking spaces, plus the ASCII control
                               whitespace
+
+WARNING: this model uses Python's Unicode tables
+-----------------------------------------------
+Deriving Java's categories from `unicodedata` is circular: it can only
+confirm that the mapping is self-consistent, not that it matches a real
+JVM. An earlier version of this module claimed "zero mismatches across
+all 1,114,112 code points" on that basis, and a real JVM disproved part
+of it.
+
+`tools/verify_jvm_semantics.py` is the authority. It executes the real
+`java.lang.Character` methods and found 9,392 differences, every one of
+them a code point unassigned in Python's Unicode 14.0.0 but assigned in
+the JVM's Unicode 16. That is version skew, not a porting defect, and it
+is measured rather than assumed away.
+
+This model remains useful for two things:
+
+  * it pins the *predicate composition*, which the JVM verification
+    confirms is correct, and
+  * it lets the contract vectors be replayed without a JVM.
+
+It must not be treated as evidence about Java's Unicode tables.
 """
 
 import unicodedata
