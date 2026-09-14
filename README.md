@@ -27,11 +27,11 @@ this work was done. See [Status](#status) for exactly what is real.
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| Flask search API | **Working** | 134 tests pass with the server running |
-| `search_engine/` extraction | **In progress** | 2 of 5 layers moved; 825 lines out of app.py |
+| Flask search API | **Working** | 159 tests pass with the server running |
+| `search_engine/` extraction | **In progress** | 3 of 6 layers; 825 lines out of app.py plus index ownership |
 | Ranking engine | **Working** | 79/79 golden vectors, exact binary64 |
 | React web UI | **Working** | builds cleanly; live search verified through the proxy |
-| Test suite | **Working** | 126 pass + 9 live tests skip without a server |
+| Test suite | **Working** | 159 pass with a server; 150 pass + 9 skip without one |
 | Shadow parity gate | **Working** | 21,365 comparisons, 0 differences |
 | JVM semantics | **Verified** | real JVM: 0 genuine divergences, rounding exact |
 | Golden vector gate | **Working** | catches drift; proven by negative control |

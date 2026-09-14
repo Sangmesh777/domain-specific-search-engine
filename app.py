@@ -60,6 +60,10 @@ if not os.path.exists(DATA_FOLDER):
 # ============================================================
 
 
+from search_engine.index_state import (
+    IndexState,
+    SnapshotIncompleteError,
+)
 from search_engine.sanitize import sanitize_upload_filename
 from search_engine.text import (
     normalize_search_query,
@@ -116,6 +120,104 @@ REAL_INVERTED_INDEX = {}
 DOCUMENT_METADATA = {}
 FILENAME_INDEX = {}
 PAGE_TEXT_INDEX = {}
+
+# ------------------------------------------------------------------
+# INDEX STATE OWNERSHIP
+# ------------------------------------------------------------------
+#
+# INDEX_STATE owns the four containers above. The legacy global names
+# are kept because the ranking and persistence code still reads them
+# directly, but they must always refer to the *same objects* as
+# INDEX_STATE's, or a reader could see a mixture of two generations.
+#
+# The four globals are rebound in exactly three places, all of which now
+# go through INDEX_STATE.replace_snapshot + sync_index_globals_from_state:
+#
+#   1. load_database_from_sqlite  (SQLite restore at startup)
+#   2. load_database              (JSON snapshot restore at startup)
+#   3. rebuild_database           (atomic swap after a full rebuild)
+#
+# assert_index_state_consistent() proves the invariant, and
+# tests/test_index_state.py exercises those paths.
+#
+# KNOWN COHERENCE GAP, NOT FIXED HERE
+# -----------------------------------
+# The single-document path is different. incrementally_index_document
+# holds INDEX_DATA_LOCK and calls _remove_document_from_memory and
+# _add_document_to_memory, which mutate the *live published containers*
+# in place (DOCUMENT_METADATA[filename] = ..., REAL_INVERTED_INDEX.pop(...),
+# and so on) rather than building replacements and swapping.
+#
+# Writers are serialised by the lock, and object identity is preserved,
+# so the invariant below still holds. But a search that captured its
+# references under INDEX_DATA_LOCK can still observe a partially
+# updated index: for example a document present in DOCUMENT_METADATA but
+# not yet in FILENAME_INDEX.
+#
+# rebuild_database does not have this problem; it assembles new
+# containers and swaps once.
+#
+# This is pre-existing behaviour, deliberately left unchanged because
+# this change is meant to add an ownership boundary, not alter ranking
+# or mutation semantics. Fixing it is the next step of the migration:
+# move both helpers onto IndexState and have them return replacement
+# containers for the caller to swap in, so every mutation path is
+# copy-on-write.
+# ------------------------------------------------------------------
+
+INDEX_STATE = IndexState(
+    inverted_index=REAL_INVERTED_INDEX,
+    document_metadata=DOCUMENT_METADATA,
+    filename_index=FILENAME_INDEX,
+    page_text_index=PAGE_TEXT_INDEX,
+)
+
+
+def sync_index_globals_from_state():
+    """
+    Point the legacy module globals at INDEX_STATE's containers.
+
+    Call this immediately after any INDEX_STATE.replace_snapshot so the
+    two representations name the same objects.
+    """
+
+    global REAL_INVERTED_INDEX
+    global DOCUMENT_METADATA
+    global FILENAME_INDEX
+    global PAGE_TEXT_INDEX
+
+    snapshot = INDEX_STATE.snapshot()
+
+    REAL_INVERTED_INDEX = snapshot["inverted_index"]
+    DOCUMENT_METADATA = snapshot["document_metadata"]
+    FILENAME_INDEX = snapshot["filename_index"]
+    PAGE_TEXT_INDEX = snapshot["page_text_index"]
+
+
+def assert_index_state_consistent():
+    """
+    Raise AssertionError unless the legacy globals and INDEX_STATE name
+    the same four objects.
+
+    A fast identity check, cheap enough to call from tests after every
+    path that mutates the index.
+    """
+
+    snapshot = INDEX_STATE.snapshot()
+
+    for name, legacy, owned in (
+        ("REAL_INVERTED_INDEX", REAL_INVERTED_INDEX, snapshot["inverted_index"]),
+        ("DOCUMENT_METADATA", DOCUMENT_METADATA, snapshot["document_metadata"]),
+        ("FILENAME_INDEX", FILENAME_INDEX, snapshot["filename_index"]),
+        ("PAGE_TEXT_INDEX", PAGE_TEXT_INDEX, snapshot["page_text_index"]),
+    ):
+        if legacy is not owned:
+            raise AssertionError(
+                f"{name} has desynchronised from INDEX_STATE: the module "
+                "global and the owned container are different objects. "
+                "A rebinding site was added without going through "
+                "INDEX_STATE.replace_snapshot + sync_index_globals_from_state."
+            )
 
 # ============================================================
 # INDEXING STATE
@@ -587,21 +689,14 @@ def load_database_from_sqlite():
 
         with INDEX_DATA_LOCK:
 
-            REAL_INVERTED_INDEX = (
-                new_inverted_index
-            )
+            INDEX_STATE.replace_snapshot({
+                "inverted_index": new_inverted_index,
+                "document_metadata": new_metadata,
+                "filename_index": new_filename_index,
+                "page_text_index": new_page_text_index,
+            })
 
-            DOCUMENT_METADATA = (
-                new_metadata
-            )
-
-            FILENAME_INDEX = (
-                new_filename_index
-            )
-
-            PAGE_TEXT_INDEX = (
-                new_page_text_index
-            )
+        sync_index_globals_from_state()
 
 
 def get_document_term_counts_from_sqlite(
@@ -968,10 +1063,15 @@ def queue_index_refresh():
 
 def load_database():
 
-    global REAL_INVERTED_INDEX
-    global DOCUMENT_METADATA
-    global FILENAME_INDEX
-    global PAGE_TEXT_INDEX
+    # Seed from the current state so that a missing snapshot file
+    # leaves that container untouched, which is what the previous
+    # implementation did by never rebinding in that case.
+    current = INDEX_STATE.snapshot()
+
+    loaded_inverted_index = current["inverted_index"]
+    loaded_document_metadata = current["document_metadata"]
+    loaded_filename_index = current["filename_index"]
+    loaded_page_text_index = current["page_text_index"]
 
     if os.path.exists(INDEX_FILE):
 
@@ -983,7 +1083,7 @@ def load_database():
                 encoding="utf-8"
             ) as file:
 
-                REAL_INVERTED_INDEX = json.load(
+                loaded_inverted_index = json.load(
                     file
                 )
 
@@ -994,7 +1094,7 @@ def load_database():
                 f"content index: {error}"
             )
 
-            REAL_INVERTED_INDEX = {}
+            loaded_inverted_index = {}
 
     if os.path.exists(META_FILE):
 
@@ -1006,7 +1106,7 @@ def load_database():
                 encoding="utf-8"
             ) as file:
 
-                DOCUMENT_METADATA = json.load(
+                loaded_document_metadata = json.load(
                     file
                 )
 
@@ -1017,7 +1117,7 @@ def load_database():
                 f"metadata: {error}"
             )
 
-            DOCUMENT_METADATA = {}
+            loaded_document_metadata = {}
 
     if os.path.exists(FILENAME_INDEX_FILE):
 
@@ -1029,7 +1129,7 @@ def load_database():
                 encoding="utf-8"
             ) as file:
 
-                FILENAME_INDEX = json.load(
+                loaded_filename_index = json.load(
                     file
                 )
 
@@ -1040,7 +1140,7 @@ def load_database():
                 f"filename index: {error}"
             )
 
-            FILENAME_INDEX = {}
+            loaded_filename_index = {}
 
     if os.path.exists(PAGE_TEXT_FILE):
 
@@ -1052,7 +1152,7 @@ def load_database():
                 encoding="utf-8"
             ) as file:
 
-                PAGE_TEXT_INDEX = json.load(
+                loaded_page_text_index = json.load(
                     file
                 )
 
@@ -1063,7 +1163,16 @@ def load_database():
                 f"page text index: {error}"
             )
 
-            PAGE_TEXT_INDEX = {}
+            loaded_page_text_index = {}
+
+    INDEX_STATE.replace_snapshot({
+        "inverted_index": loaded_inverted_index,
+        "document_metadata": loaded_document_metadata,
+        "filename_index": loaded_filename_index,
+        "page_text_index": loaded_page_text_index,
+    })
+
+    sync_index_globals_from_state()
 
 
 # ============================================================
@@ -1253,10 +1362,14 @@ def rebuild_database():
 
     # One pointer swap: searches see old or new, never a partial build.
     with INDEX_DATA_LOCK:
-        REAL_INVERTED_INDEX = new_inverted_index
-        DOCUMENT_METADATA = new_document_metadata
-        FILENAME_INDEX = new_filename_index
-        PAGE_TEXT_INDEX = new_page_text_index
+        INDEX_STATE.replace_snapshot({
+            "inverted_index": new_inverted_index,
+            "document_metadata": new_document_metadata,
+            "filename_index": new_filename_index,
+            "page_text_index": new_page_text_index,
+        })
+
+    sync_index_globals_from_state()
 
     print(
         "[REBUILD] Active snapshot swapped atomically."
