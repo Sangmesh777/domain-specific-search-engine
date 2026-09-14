@@ -269,4 +269,28 @@ def test_corpus_health(baseline):
     # may legitimately contain user documents created outside the suite,
     # so assert that the corpus did not lose baseline documents.
     assert data["documents"] >= baseline["documents"]
-    assert data["content_terms"] > 0
+
+    # An index that holds documents must hold content terms: the engine
+    # refuses to index a document with no readable text. Stated this way
+    # the assertion is meaningful for a populated development server and
+    # still correct for a fresh checkout, which legitimately reports
+    # zero documents and zero terms.
+    if data["documents"] > 0:
+        assert data["content_terms"] > 0
+
+    # Every counter must be a sane non-negative integer and the index
+    # must always report one of the three defined states.
+    for field in (
+        "documents",
+        "content_terms",
+        "filenames_indexed",
+        "page_text_entries",
+    ):
+        assert isinstance(data[field], int)
+        assert data[field] >= 0
+
+    assert data["indexing"]["state"] in {
+        "READY",
+        "INDEXING",
+        "ERROR",
+    }

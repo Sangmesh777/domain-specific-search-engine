@@ -28,7 +28,15 @@ CORS(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-DATA_FOLDER = os.path.join(BASE_DIR, "data")
+# The corpus location can be redirected so that the engine can be run
+# against a throwaway directory. This is used by the hermetic test
+# suite and by the golden-vector / corpus-sidecar generators, which
+# must never touch the developer's real corpus.
+#
+# Default behaviour is unchanged: <repo>/data
+DATA_FOLDER = os.environ.get(
+    "SEARCH_ENGINE_DATA_DIR"
+) or os.path.join(BASE_DIR, "data")
 
 INDEX_FILE = os.path.join(DATA_FOLDER, "inverted_index.json")
 META_FILE = os.path.join(DATA_FOLDER, "document_meta.json")
