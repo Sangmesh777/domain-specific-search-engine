@@ -200,6 +200,23 @@ CASES = [
     ("quoted phrase repeated", '"machine learning"', 1, 10),
     ("quoted filename", '"Network Security Guide.pdf"', 1, 10),
 
+    # Quoted phrases in which no query word touches a filename, so the
+    # quoted-only weight branch (.05/.15/.80) is what ranks them.
+    #
+    # Every quoted case above also matches a document title - "alpha beta",
+    # "machine learning" and "Network Security Guide.pdf" are all filenames -
+    # which sets query_has_filename_signal and routes them to the
+    # quoted+filename branch instead. The quoted-only branch therefore had
+    # zero coverage: a port could swap its content and phrase weights, or
+    # drop the branch entirely, and still reproduce every other vector
+    # exactly. Two documents are used so the branch is sampled twice.
+    #
+    # Its filename_weight stays unverifiable by construction: a quoted query
+    # reaching this branch has filename_relevance == 0 for every document,
+    # since any filename match at all would have selected the other branch.
+    ("quoted content phrase only", '"firewalls filter"', 1, 10),
+    ("quoted content phrase other document", '"removes redundancy"', 1, 10),
+
     # Case folding and word splitting, which a reimplementation tends to get
     # subtly wrong by reaching for a locale-sensitive lowercase or a
     # different punctuation rule.
@@ -218,6 +235,22 @@ CASES = [
     ("common term", "the", 1, 10),
     ("prefix three characters", "netwo", 1, 10),
     ("prefix longer", "normaliza", 1, 10),
+
+    # Prefix similarity is clamped with min(0.90, max(0.25, len(word) /
+    # len(term))). The two cases above sit inside that range, so neither
+    # reaches a bound: a port using 0.95 or 0.99 as the ceiling reproduced
+    # every other vector exactly and was still wrong. These three pin the
+    # upper clamp and its boundary, and the lower clamp is pinned by
+    # "prefix three characters" (3/7 = 0.4286 is above 0.25, so it is the
+    # engine-level tests that hold the floor).
+    #
+    #   fundamental     11/12 = 0.9167 -> clamped to 0.90
+    #   unique777marke  14/15 = 0.9333 -> clamped to 0.90
+    #   redundanc        9/10 = 0.9000 -> exactly on the clamp
+    ("prefix above the upper clamp", "fundamental", 1, 10),
+    ("prefix far above the upper clamp", "unique777marke", 1, 10),
+    ("prefix exactly on the upper clamp", "redundanc", 1, 10),
+
     ("exact numeric term", "999", 1, 10),
     ("numeric substring", "777", 1, 10),
     ("single digit", "2", 1, 10),

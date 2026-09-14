@@ -1060,6 +1060,100 @@
     {
       "expected": {
         "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.3466,
+            "document_url": "/api/documents/Network_Security_Guide.pdf",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 16,
+                "start": 0
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Phrase Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Security_Guide.pdf#page=1",
+            "path": "{{data_folder}}/Network_Security_Guide.pdf",
+            "phrase_occurrences": 1,
+            "phrase_score": 50.0,
+            "prefix_similarity": 0.0,
+            "score": 0.55,
+            "snippet": "firewalls filter traffic between network zones",
+            "tag": "Ranked Result",
+            "title": "Network_Security_Guide.pdf"
+          }
+        ]
+      },
+      "name": "quoted content phrase only",
+      "query": "\"firewalls filter\"",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.3466,
+            "document_url": "/api/documents/Database_Guide.docx",
+            "exact_content_match": true,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 32,
+                "start": 14
+              }
+            ],
+            "lexical_match_relevance": 1.0,
+            "match_type": "Phrase Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Database_Guide.docx#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Database_Guide.docx#page=1",
+            "path": "{{data_folder}}/Database_Guide.docx",
+            "phrase_occurrences": 1,
+            "phrase_score": 50.0,
+            "prefix_similarity": 0.0,
+            "score": 0.55,
+            "snippet": "normalization removes redundancy from relations alpha appears here and beta appears much later",
+            "tag": "Ranked Result",
+            "title": "Database_Guide.docx"
+          }
+        ]
+      },
+      "name": "quoted content phrase other document",
+      "query": "\"removes redundancy\"",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
           "end": 2,
           "has_next": false,
           "has_previous": false,
@@ -1717,6 +1811,147 @@
       },
       "name": "prefix longer",
       "query": "normaliza",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0922,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": false,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 28,
+                "start": 17
+              }
+            ],
+            "lexical_match_relevance": 0.97,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Network_Notes.pdf#page=1",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.9,
+            "score": 0.7455,
+            "snippet": "computer network fundamentals and the osi model",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "prefix above the upper clamp",
+      "query": "fundamental",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.0922,
+            "document_url": "/api/documents/Network_Notes.pdf",
+            "exact_content_match": false,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 24,
+                "start": 10
+              }
+            ],
+            "lexical_match_relevance": 0.97,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Network_Notes.pdf#page=3",
+            "page": 3,
+            "page_url": "/api/documents/Network_Notes.pdf#page=3",
+            "path": "{{data_folder}}/Network_Notes.pdf",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.9,
+            "score": 0.7455,
+            "snippet": "the token unique777marker hides a numeric run",
+            "tag": "Ranked Result",
+            "title": "Network_Notes.pdf"
+          }
+        ]
+      },
+      "name": "prefix far above the upper clamp",
+      "query": "unique777marke",
+      "requested_limit": 10,
+      "requested_page": 1
+    },
+    {
+      "expected": {
+        "pagination": {
+          "end": 1,
+          "has_next": false,
+          "has_previous": false,
+          "limit": 10,
+          "page": 1,
+          "start": 1,
+          "total": 1,
+          "total_pages": 1
+        },
+        "results": [
+          {
+            "content_score": 0.156,
+            "document_url": "/api/documents/Database_Guide.docx",
+            "exact_content_match": false,
+            "filename_score": 0.0,
+            "filetype_filter": null,
+            "highlights": [
+              {
+                "end": 31,
+                "start": 22
+              }
+            ],
+            "lexical_match_relevance": 0.97,
+            "match_type": "Content Match",
+            "numeric_similarity": 0.0,
+            "open_url": "/api/documents/Database_Guide.docx#page=1",
+            "page": 1,
+            "page_url": "/api/documents/Database_Guide.docx#page=1",
+            "path": "{{data_folder}}/Database_Guide.docx",
+            "phrase_occurrences": 0,
+            "phrase_score": 0.0,
+            "prefix_similarity": 0.9,
+            "score": 0.7455,
+            "snippet": "normalization removes redundancy from relations alpha appears here and beta appears much later",
+            "tag": "Ranked Result",
+            "title": "Database_Guide.docx"
+          }
+        ]
+      },
+      "name": "prefix exactly on the upper clamp",
+      "query": "redundanc",
       "requested_limit": 10,
       "requested_page": 1
     },
