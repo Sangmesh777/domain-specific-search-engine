@@ -60,11 +60,26 @@ def test_comparison_actually_ran(parity):
 
 
 def test_all_expected_functions_were_compared(parity):
-    assert len(EXTRACTED) == 5
+    """
+    Every function moved out of app.py must be under shadow parity.
+
+    If a function is extracted and not added here, the gate silently
+    stops covering it.
+    """
+
     assert set(EXTRACTED) == {
+        # Layer 1: pure text and sanitizer
         "tokenize",
         "tokenize_filename",
         "normalize_search_query",
         "parse_filetype_filter",
         "sanitize_upload_filename",
+        # Layer 2: extraction and snippet scoring
+        "count_phrase_occurrences",
+        "extract_text",
+        "extract_pages",
+        "build_snippet_result",
+        "get_snippet_and_page",
     }
+
+    assert parity["functions"] == len(EXTRACTED)

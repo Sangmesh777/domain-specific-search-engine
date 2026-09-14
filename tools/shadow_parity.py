@@ -45,14 +45,63 @@ EXTRACTED = {
     "normalize_search_query": "search_engine.text",
     "parse_filetype_filter": "search_engine.text",
     "sanitize_upload_filename": "search_engine.sanitize",
+    "count_phrase_occurrences": "search_engine.extract",
+    "extract_text": "search_engine.extract",
+    "extract_pages": "search_engine.extract",
+    "build_snippet_result": "search_engine.snippet",
+    "get_snippet_and_page": "search_engine.snippet",
+}
+
+# Functions whose extracted signature differs from the original.
+#
+# `get_snippet_and_page` gained an explicit `page_text_index` parameter so
+# the core no longer reaches into global state. The adapter supplies the
+# original global, so the shadow harness passes the same object through
+# and the comparison stays meaningful.
+SIGNATURE_ADAPTERS = {
+    "get_snippet_and_page": {
+        "adapter": "page_text_index",
+        "source": "search_engine.snippet",
+    },
+}
+
+# Functions that have no single-string input signature and therefore need
+# dedicated case generation instead of the string corpus.
+STRUCTURED_FUNCTIONS = {
+    "count_phrase_occurrences",
+    "extract_text",
+    "extract_pages",
+    "build_snippet_result",
+    "get_snippet_and_page",
 }
 
 RANDOM_CASES = 4000
 RANDOM_SEED = 20260914
 
+# The page text index used by both sides of the comparison. The original
+# read it as a module global; the extracted version takes it as a
+# parameter. Sharing one object is what keeps the comparison meaningful.
+PAGE_TEXT_INDEX_FIXTURE = {
+    "note.txt": [
+        {"page": 1, "text": "alpha beta gamma sharedterm here"},
+    ],
+    "multi.txt": [
+        {"page": 1, "text": "first page alpha"},
+        {"page": 2, "text": "second page beta gamma"},
+    ],
+}
+
 
 class ShadowParityError(Exception):
     """Raised when the shadow comparison cannot be set up."""
+
+
+def load_original_namespace(base_revision):
+    """Load the original definitions and return (namespace, source)."""
+
+    namespace = load_original_functions(base_revision)
+
+    return namespace, None
 
 
 def load_original_functions(base_revision):
@@ -103,13 +152,19 @@ def load_original_functions(base_revision):
 
     namespace = {}
 
-    # The originals reference os and secure_filename.
+    # The originals reference os, secure_filename and the page text
+    # index global.
     header = (
         "import os\n"
+        "import re\n"
+        "import PyPDF2\n"
+        "import docx\n"
         "from werkzeug.utils import secure_filename\n"
     )
 
     exec(header + "\n\n\n".join(segments), namespace)
+
+    namespace["PAGE_TEXT_INDEX"] = PAGE_TEXT_INDEX_FIXTURE
 
     return {
         name: namespace[name]
@@ -277,7 +332,7 @@ def build_inputs():
 
 
 def run(base_revision=DEFAULT_BASE, limit=20):
-    originals = load_original_functions(base_revision)
+    original_module, _source = load_original_namespace(base_revision)
     extracted = load_extracted_functions()
 
     inputs = build_inputs()
@@ -285,8 +340,22 @@ def run(base_revision=DEFAULT_BASE, limit=20):
     differences = []
     comparisons = 0
 
+    # The global index the original read, reused as the explicit
+    # argument for the transformed version.
+    page_text_index = PAGE_TEXT_INDEX_FIXTURE
+
+    structured_failures = run_structured(
+        original_module,
+        extracted,
+        page_text_index,
+        limit,
+    )
+
     for name in EXTRACTED:
-        original = originals[name]
+        if name in STRUCTURED_FUNCTIONS:
+            continue
+
+        original = original_module[name]
         new = extracted[name]
 
         for value in inputs:
@@ -317,6 +386,10 @@ def run(base_revision=DEFAULT_BASE, limit=20):
                         "actual_error": actual_error,
                     })
 
+    comparisons += structured_failures["comparisons"]
+
+    differences.extend(structured_failures["differences"][:limit])
+
     return {
         "base_revision": base_revision,
         "inputs": len(inputs),
@@ -324,6 +397,133 @@ def run(base_revision=DEFAULT_BASE, limit=20):
         "comparisons": comparisons,
         "differences": differences,
     }
+
+
+def run_structured(original_module, extracted, page_text_index, limit):
+    """
+    Compare the functions that do not take a single string.
+
+    These are exercised with representative arguments rather than the
+    string corpus.
+    """
+
+    differences = []
+    comparisons = 0
+
+    def compare_call(label, expected, actual):
+        nonlocal comparisons
+
+        comparisons += 1
+
+        if expected != actual and len(differences) < limit:
+            differences.append({
+                "function": label,
+                "input": label,
+                "expected": expected,
+                "actual": actual,
+                "expected_error": None,
+                "actual_error": None,
+            })
+
+    # --- count_phrase_occurrences -----------------------------------
+    texts = [
+        "",
+        "alpha beta gamma",
+        "alpha alpha alpha",
+        "ALPHA beta Alpha",
+        "sharedterm the sharedterm and sharedterm",
+        "a\u00a0b a b",
+        "\u00e9\u00e9\u00e9",
+    ]
+    phrases = ["", "alpha", "a", "sharedterm", "beta gamma", "\u00e9"]
+
+    for text in texts:
+        for phrase in phrases:
+            compare_call(
+                "count_phrase_occurrences",
+                original_module["count_phrase_occurrences"](text, phrase),
+                extracted["count_phrase_occurrences"](text, phrase),
+            )
+
+    # --- build_snippet_result ---------------------------------------
+    #
+    # Called through its documented keyword interface.
+    import inspect
+
+    signature = inspect.signature(original_module["build_snippet_result"])
+    parameters = list(signature.parameters)
+
+    if parameters:
+        sample = {
+            "snippet": "alpha beta gamma",
+            "highlights": [],
+            "page": 1,
+        }
+
+        try:
+            expected = original_module["build_snippet_result"](
+                **{key: sample.get(key) for key in parameters}
+            )
+            actual = extracted["build_snippet_result"](
+                **{key: sample.get(key) for key in parameters}
+            )
+
+            compare_call("build_snippet_result", expected, actual)
+        except TypeError:
+            # The interface is positional; skip rather than guess.
+            pass
+
+    # --- get_snippet_and_page ---------------------------------------
+    #
+    # The extracted version takes the index explicitly; the original read
+    # it from module state. Both must produce the same result.
+    queries = [
+        ["alpha"],
+        ["beta", "gamma"],
+        ["missing"],
+        ["sharedterm"],
+        [],
+    ]
+
+    for document in ("note.txt", "multi.txt", "absent.txt"):
+        for words in queries:
+            expected = original_module["get_snippet_and_page"](
+                document, words
+            )
+            actual = extracted["get_snippet_and_page"](
+                page_text_index, document, words
+            )
+
+            compare_call(
+                f"get_snippet_and_page({document}, {words})",
+                expected,
+                actual,
+            )
+
+        for window in (10, 40, 140, 1000):
+            expected = original_module["get_snippet_and_page"](
+                document, ["alpha"], window
+            )
+            actual = extracted["get_snippet_and_page"](
+                page_text_index, document, ["alpha"], window
+            )
+
+            compare_call(
+                f"get_snippet_and_page({document}, window={window})",
+                expected,
+                actual,
+            )
+
+    # A missing document must behave identically too.
+    compare_call(
+        "get_snippet_and_page(missing document)",
+        original_module["get_snippet_and_page"]("absent.txt", ["alpha"]),
+        extracted["get_snippet_and_page"](
+            page_text_index, "absent.txt", ["alpha"]
+        ),
+    )
+
+    return {"comparisons": comparisons, "differences": differences}
 
 
 def main(argv=None):

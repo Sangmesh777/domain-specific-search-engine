@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -64,6 +65,50 @@ device than on the server. Pinned by the `sanitize_filename` section of
 `tests/golden/search_engine_vectors.json`.
 """''',
     },
+}
+
+EXTRACTION_PLAN["search_engine/extract.py"] = {
+    "title": "Document text and page extraction.",
+    "functions": [
+        "count_phrase_occurrences",
+        "extract_text",
+        "extract_pages",
+    ],
+    "imports": [
+        "import PyPDF2",
+        "import docx",
+    ],
+    "docstring": "",
+}
+
+EXTRACTION_PLAN["search_engine/snippet.py"] = {
+    "title": "Snippet, highlight and page selection.",
+    "functions": [
+        "build_snippet_result",
+        "get_snippet_and_page",
+    ],
+    "imports": ["import re"],
+    "docstring": "",
+}
+
+# Functions whose body or signature must change during extraction.
+#
+# `get_snippet_and_page` reads the module-global page text index. Making
+# that an explicit parameter is the whole point of the extraction: the
+# core must not reach into global state. The replacement is a pure rename,
+# so the shadow harness can still prove equivalence by supplying the same
+# object through an adapter.
+TRANSFORMS = {
+    "get_snippet_and_page": {
+        "add_leading_parameter": "page_text_index",
+        "rename_names": {"PAGE_TEXT_INDEX": "page_text_index"},
+    },
+}
+
+# Call sites in app.py that must supply the newly explicit state. app.py
+# is the adapter and owns the global index, so it passes it in.
+CALL_SITE_REWRITES = {
+    "get_snippet_and_page(": "get_snippet_and_page(\n                PAGE_TEXT_INDEX,",
 }
 
 
@@ -139,6 +184,11 @@ def plan_extraction(source):
     operations = []
 
     for relative_path, spec in EXTRACTION_PLAN.items():
+        # Already-extracted modules are skipped, so the tool can be run
+        # again to move the next layer without redoing the first.
+        if (REPO_ROOT / relative_path).exists():
+            continue
+
         for name in spec["functions"]:
             if name not in functions:
                 raise ExtractionError(
@@ -160,12 +210,44 @@ def plan_extraction(source):
     return operations
 
 
-def render_module(relative_path, spec, sources):
+def apply_transform(name, text):
+    """Apply the declared transform for `name`, if any."""
+
+    transform = TRANSFORMS.get(name)
+
+    if not transform:
+        return text
+
+    # Insert the extra leading parameter after the opening parenthesis of
+    # the def statement.
+    parameter = transform.get("add_leading_parameter")
+
+    if parameter:
+        opening = text.index("(")
+        text = (
+            text[: opening + 1]
+            + "\n    "
+            + parameter
+            + ","
+            + text[opening + 1 :]
+        )
+
+    # Rename module globals to the new parameters.
+    for old_name, new_name in transform.get("rename_names", {}).items():
+        text = re.sub(rf"\b{old_name}\b", new_name, text)
+
+    return text
+
+
+def render_module(relative_path, spec, sources, names):
     """Render the full text of a new module."""
 
     parts = [_module_header(relative_path, spec, sources)]
 
-    body = "\n\n\n".join(text.rstrip("\n") for text in sources)
+    body = "\n\n\n".join(
+        apply_transform(name, text).rstrip("\n")
+        for name, text in zip(names, sources)
+    )
 
     return "".join(parts) + body + "\n"
 
@@ -181,6 +263,9 @@ def build_removal_plan(source):
     removals = []
 
     for relative_path, spec in EXTRACTION_PLAN.items():
+        if (REPO_ROOT / relative_path).exists():
+            continue
+
         for name in spec["functions"]:
             start, end, _text = functions[name]
             removals.append((start, end))
@@ -200,14 +285,17 @@ def apply_extraction(dry_run=False):
     by_module = {}
 
     for relative_path, spec in EXTRACTION_PLAN.items():
+        if (REPO_ROOT / relative_path).exists():
+            continue
+
         by_module[relative_path] = [
-            operation["text"]
+            (operation["function"], operation["text"])
             for operation in operations
             if operation["module"] == relative_path
         ]
 
     if dry_run:
-        for relative_path, sources in by_module.items():
+        for relative_path, entries in by_module.items():
             print(
                 f"would write {relative_path} "
                 f"({len(sources)} functions, "
@@ -231,11 +319,14 @@ def apply_extraction(dry_run=False):
             encoding="utf-8",
         )
 
-    for relative_path, sources in by_module.items():
+    for relative_path, entries in by_module.items():
         destination = REPO_ROOT / relative_path
         spec = EXTRACTION_PLAN[relative_path]
 
-        rendered = render_module(relative_path, spec, sources)
+        names = [name for name, _text in entries]
+        sources = [text for _name, text in entries]
+
+        rendered = render_module(relative_path, spec, sources, names)
 
         destination.write_text(rendered, encoding="utf-8")
 
@@ -247,7 +338,13 @@ def apply_extraction(dry_run=False):
     # --- rewrite app.py ------------------------------------------------
     lines = source.splitlines(keepends=True)
 
-    removals = build_removal_plan(source)
+    # Derive the removals from the operations already computed. Calling
+    # build_removal_plan here would re-check the filesystem and skip
+    # every module, because the modules were just written.
+    removals = sorted(
+        (operation["start"], operation["end"])
+        for operation in operations
+    )
 
     removed = set()
 
@@ -266,21 +363,46 @@ def apply_extraction(dry_run=False):
     first_removal = removals[0][0]
     adjusted = first_removal
 
-    import_block = (
-        "\n"
-        "from search_engine.sanitize import sanitize_upload_filename\n"
-        "from search_engine.text import (\n"
-        "    normalize_search_query,\n"
-        "    parse_filetype_filter,\n"
-        "    tokenize,\n"
-        "    tokenize_filename,\n"
+    moved = {
+        operation["function"]
+        for operation in operations
+    }
+
+    import_block = "\n"
+
+    if "extract_text" in moved:
+        import_block += (
+        "from search_engine.extract import (\n"
+        "    count_phrase_occurrences,\n"
+        "    extract_pages,\n"
+        "    extract_text,\n"
         ")\n"
-        "\n"
-    )
+        )
+
+    if "get_snippet_and_page" in moved:
+        import_block += (
+        "from search_engine.snippet import (\n"
+        "    build_snippet_result,\n"
+        "    get_snippet_and_page,\n"
+        ")\n"
+        )
+
+    import_block += "\n"
 
     kept.insert(adjusted, import_block)
 
-    APP_PATH.write_text("".join(kept), encoding="utf-8")
+    rewritten = "".join(kept)
+
+    for needle, replacement in CALL_SITE_REWRITES.items():
+        if needle not in rewritten:
+            raise ExtractionError(
+                f"call site {needle!r} was not found in app.py, so the "
+                "new parameter cannot be supplied"
+            )
+
+        rewritten = rewritten.replace(needle, replacement, 1)
+
+    APP_PATH.write_text(rewritten, encoding="utf-8")
 
     print(f"rewrote app.py (-{len(removed)} lines, +imports)")
 
