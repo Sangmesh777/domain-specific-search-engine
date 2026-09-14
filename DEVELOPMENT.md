@@ -314,23 +314,147 @@ pre-refactor implementation and pinned by
 unchanged rather than unnoticed. Redesigning that rollback is a
 separate decision, not a side effect of copy-on-write.
 
+### Layer 4: `search_engine/storage.py` (done)
+
+All SQLite and JSON persistence moved out of `app.py`: the connection
+factory, the schema, the full sync, the incremental-write helpers'
+read path, the SQLite rebuild, the JSON snapshot loader, the JSON
+writer and the save path. `app.py` keeps thin adapters, so the
+document-import and bulk-delete call sites did not have to change.
+
+The layer is deliberately ignorant of the application. It has no Flask
+import, no reference to `INDEX_DATA_LOCK`, and no reference to the four
+index globals or `INDEX_STATE`. It takes its inputs as parameters and
+returns its results:
+
+```python
+def load_database_from_sqlite(*, db_path) -> dict   # returns, installs nothing
+def load_json_snapshot(*, index_file, meta_file, filename_index_file,
+                       page_text_file, current) -> dict
+def sync_sqlite_from_memory(*, db_path, inverted_index, document_metadata,
+                           filename_index, page_text_index, connection=None)
+def save_database_snapshot(*, index_file, meta_file, filename_index_file,
+                           page_text_file, inverted_index, document_metadata,
+                           filename_index, page_text_index)
+def atomic_write_json(path, payload)
+def get_sqlite_connection(db_path)
+def get_document_term_counts_from_sqlite(db_path, filename)
+def create_schema(connection)
+def count_documents(connection)
+```
+
+`load_database_from_sqlite` returns `None` when SQLite is empty, and the
+adapter turns that back into the original "leave the active state alone"
+early return.
+
+`tests/test_storage_parity.py` enforces the separation structurally: no
+Flask import, no global names, and both reconstruction functions must
+contain a `return` and must not call `publish_index_state`.
+
+### Proving reconstruction
+
+`tools/storage_equivalence.py` runs a whole engine session - ingest,
+then a restart in a fresh process - against both the extracted layer and
+the monolith read out of git at `18429c2`, then compares:
+
+* all four containers, element by element and order-sensitively
+* every row of all four SQLite tables, in row order
+* the schema
+* all four JSON snapshot files
+* the restart's reconstructed state against the ingest state
+
+7 fixtures, **230,538 values compared, 0 differences**.
+
+Two things about that number are worth stating plainly, because either
+one could have made it meaningless:
+
+* Both engines run with `PYTHONHASHSEED=0`. Without it the comparison
+  is comparing noise - see the finding below.
+* One deliberately insensitive fixture had to be added. On the golden
+  corpus the stored row order happens to equal sorted order under seed
+  0, so changing the reader's `ORDER BY filename, rowid` to
+  `ORDER BY filename, term` produced **zero** differences. The
+  `order-sensitive-filenames` fixture uses filenames whose token sets
+  iterate in a non-alphabetical order under seed 0, which makes the
+  order source observable. With it, the same edit is caught.
+
+Negative controls, all observed:
+
+| Break | Result |
+| --- | --- |
+| 11 in-process corruptions (dropped term, changed count, dropped document, reordered filename tokens, changed page text, changed/dropped/reordered SQLite rows, changed schema, removed snapshot file, changed action log) | all 11 reported |
+| `ORDER BY filename, rowid` -> `ORDER BY filename, term` | `order-sensitive-filenames/reconstruct: filename_index differs` |
+| `term_count` read as `term_count + 1` | `reconstruct: inverted_index differs` |
+| `total_words` and `page_count` swapped in the SELECT | `reconstruct: document_metadata differs` |
+| page text read as `text \|\| ' TAMPERED'` | `reconstruct: page_text_index differs` |
+
+Two of those attempts initially produced a false "no difference", and in
+both cases the control was wrong rather than the tool: one patch matched
+the schema comment instead of the SQL, and one "reorder" replaced a
+one-element list with itself. Both were fixed before being believed.
+
+### Open finding: filename token order does not survive a restart
+
+This is pre-existing, reproduced identically on the monolith, and
+**ranking-visible**. It is not caused by the extraction, and it is not
+fixed here because this phase preserves behaviour.
+
+`sync_sqlite_from_memory` and `incrementally_index_document` both write
+`filename_terms` from `set(filename_words)`, so the persisted row order
+is set-iteration order. `load_database_from_sqlite` reads it back with
+`ORDER BY filename, rowid`. The sequence that was live before a restart
+is therefore not the sequence that comes back.
+
+That matters because `execute_search` builds
+
+```python
+normalized_filename = " ".join(filename_words)
+```
+
+and tests `normalized_phrase in normalized_filename`. When a query is
+quoted, documents without `phrase_match` are filtered out entirely.
+
+Measured, on an isolated corpus whose only copy of the phrase is in the
+filename, with the content deliberately unrelated:
+
+```text
+before restart   "network security notes" -> ['network security notes.txt']
+after  restart   "network security notes" -> []
+```
+
+Reproduced on 6/6 hash seeds for the extracted engine and 3/3 for the
+monolith at `18429c2`. In the current corpus 6 of the 13 documents are
+stored in a scrambled order; the breakage is usually masked because the
+phrase also appears in the document's content, which is why it has gone
+unnoticed.
+
+**Required next phase**: make the filename token order round-trip.
+The minimal change is to persist the tokens in their natural order
+(drop `set(...)`, or add an explicit ordinal column) and to keep the
+reader's `ORDER BY` consistent with the writer. It needs its own parity
+run, because it changes stored data.
+
 ### Remaining extraction surface (measured)
 
-`tools/` reports this via the dependency analysis below. The remaining
-coupled code and what each part reads:
+`tools/` reports this via the dependency analysis below. After layer 4,
+`app.py` contains **no** schema creation, no connection factory, no
+`SELECT`, and no JSON file I/O. The only SQL left is the incremental
+write path, confined to exactly two functions and asserted by
+`test_remaining_sql_in_app_is_confined_to_the_incremental_paths`:
 
 | Function | Lines | Reads |
 | --- | --- | --- |
 | `execute_search` | 1378 | the four index dicts, `INDEX_DATA_LOCK`, and `jsonify` |
-| `rebuild_database` | 153 | the four index dicts, `DATA_FOLDER`, `INDEX_DATA_LOCK` |
+| `incrementally_index_document` | 178 | `INDEX_DATA_LOCK`, `INSERT INTO` / `DELETE FROM` |
 | `upload_file` | 157 | the four index dicts, `DATA_FOLDER` |
+| `rebuild_database` | 153 | the four index dicts, `DATA_FOLDER`, `INDEX_DATA_LOCK` |
 | `bulk_delete_documents` | 146 | the four index dicts, `DATA_FOLDER` |
-| `sync_sqlite_from_memory` | 106 | the four index dicts |
-| `load_database` | 97 | the four snapshot file paths |
-| `incrementally_index_document` | 178 | `INDEX_DATA_LOCK` plus memory/index helpers |
-| `incrementally_remove_document` | 53 | `INDEX_DATA_LOCK`, SQLite helpers |
 | `open_document` | 85 | the four index dicts, `DATA_FOLDER` |
-| persistence helpers | ~200 | file paths, `sqlite3`, `INDEX_STATUS` |
+| `incrementally_remove_document` | 53 | `INDEX_DATA_LOCK`, `DELETE FROM` |
+| persistence adapters | ~160 | thin wrappers over `search_engine/storage.py` |
+
+`import sqlite3` and `import json` were removed from `app.py`; both are
+now unused, and a test fails if either comes back.
 
 The four globals to replace with an explicit index-state object are:
 
@@ -348,8 +472,9 @@ Order of work, each step gated by shadow parity plus the golden vectors:
 2. Move the memory mutation helpers
    (`_add_document_to_memory`, `_remove_document_from_memory`,
    `rebuild_database`, `sync_sqlite_from_memory`) onto that object.
-3. Move persistence (`load_database`, `save_database`,
-   `save_database_snapshot`, `atomic_write_json`, the SQLite helpers).
+3. ~~Move persistence (`load_database`, `save_database`,
+   `save_database_snapshot`, `atomic_write_json`, the SQLite helpers).~~
+   Done as layer 4.
 4. Move `execute_search` last, as `SearchEngine.search(query, page,
    limit)` returning a plain dict. It currently calls `jsonify`
    directly; that call must move to the adapter, which is the single

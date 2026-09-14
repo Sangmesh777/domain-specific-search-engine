@@ -1,0 +1,334 @@
+"""
+Run one complete engine session against an isolated data directory and
+dump everything a parity comparison needs.
+
+This is a *driver*, not a checker. `tools/storage_equivalence.py` starts
+it twice - once against the current engine and once against the engine
+as it was before the persistence layer was extracted - and compares the
+two dumps.
+
+It runs as a subprocess for two reasons. A whole engine cannot be
+imported twice in one process, because the startup path rebuilds
+module-level state; and a restart has to be a genuinely new process or
+it is not testing reconstruction at all.
+
+Usage (normally via the equivalence tool):
+
+    python -m tools.storage_probe \
+        --engine new|legacy \
+        --base <git-revision> \
+        --data <data-directory> \
+        --corpus <corpus-directory> \
+        --phase ingest|reconstruct \
+        --out <json-file>
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Phases. `ingest` indexes the corpus, exercises the full-sync path and
+# writes the JSON snapshot. `reconstruct` starts a second process over
+# the same data directory and dumps what SQLite rebuilds.
+PHASES = ("ingest", "reconstruct")
+
+SQLITE_TABLES = ("documents", "term_postings", "filename_terms", "pages")
+
+CONTAINERS = (
+    "inverted_index",
+    "document_metadata",
+    "filename_index",
+    "page_text_index",
+)
+
+
+class ProbeError(Exception):
+    """Raised when the session cannot be run or dumped."""
+
+
+def _load_engine():
+    """Import the engine from the working tree."""
+
+    import app
+
+    return app
+
+def _load_legacy_engine(base_revision):
+    """
+    exec the app.py from `base_revision` into a namespace.
+
+    Its `__name__` is deliberately not `__main__`, so the start-server
+    block at the bottom of the file does not run. Its `__file__` is
+    pointed inside the repository so the engine's BASE_DIR resolves the
+    way it does in normal use.
+    """
+
+    completed = subprocess.run(
+        ["git", "show", f"{base_revision}:app.py"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
+    )
+
+    source = completed.stdout
+
+    if "def sync_sqlite_from_memory" not in source:
+        raise ProbeError(
+            f"revision {base_revision} does not look like the monolithic "
+            "engine"
+        )
+
+    # `__file__` must live inside the repository so the engine's BASE_DIR
+    # resolves the way it does in normal use.
+    fake_path = REPO_ROOT / "_legacy_app_for_parity.py"
+
+    namespace = {
+        "__name__": "_legacy_app_for_parity",
+        "__file__": str(fake_path),
+        "__builtins__": __builtins__,
+    }
+
+    exec(compile(source, str(fake_path), "exec"), namespace)
+
+    return namespace
+
+
+# The engine exposes the same names either way: as module attributes for
+# the real module, as namespace entries for the exec'd legacy source.
+def _get(engine, name):
+    if isinstance(engine, dict):
+        return engine[name]
+
+    return getattr(engine, name)
+
+
+def _snapshot_containers(engine):
+    """Return the four published containers, deep-copied into plain data."""
+
+    state = _get(engine, "INDEX_STATE")
+
+    published = state.snapshot()
+
+    return {
+        name: json.loads(json.dumps(published[name]))
+        for name in CONTAINERS
+    }
+
+
+def _dump_sqlite(data_dir):
+    """Dump every row of every table, in a deterministic order."""
+
+    import sqlite3
+
+    db_path = Path(data_dir) / "search.db"
+
+    if not db_path.exists():
+        return {"exists": False, "tables": {}}
+
+    connection = sqlite3.connect(str(db_path))
+
+    try:
+        tables = {}
+
+        for table in SQLITE_TABLES:
+
+            rows = connection.execute(
+                f"SELECT * FROM {table} ORDER BY rowid"
+            ).fetchall()
+
+            columns = [
+                description[0]
+                for description in connection.execute(
+                    f"SELECT * FROM {table} LIMIT 0"
+                ).description
+            ]
+
+            tables[table] = {
+                "columns": columns,
+                "rows": [list(row) for row in rows],
+            }
+
+        schema = [
+            {"type": row[0], "name": row[1], "sql": row[2]}
+            for row in connection.execute(
+                "SELECT type, name, sql FROM sqlite_master "
+                "ORDER BY type, name"
+            )
+        ]
+
+    finally:
+        connection.close()
+
+    return {"exists": True, "tables": tables, "schema": schema}
+
+
+def _dump_json_files(data_dir):
+    """
+    Dump every JSON file in the data directory.
+
+    Discovered rather than listed: the engine's file names are module
+    constants, and hardcoding them here would let a mismatch in those
+    constants pass unnoticed because both sides were compared against
+    the same wrong list.
+    """
+
+    dumped = {}
+
+    for path in sorted(Path(data_dir).glob("*.json")):
+
+        dumped[path.name] = json.loads(
+            path.read_text(encoding="utf-8")
+        )
+
+    return dumped
+
+
+def _delete(engine, names):
+    """
+    Remove documents through the real single-document delete path.
+
+    `incrementally_remove_document` reads the term counts back out of
+    SQLite and rewrites both stores, so it is the persistence path with
+    the most moving parts.
+    """
+
+    incrementally_remove_document = _get(
+        engine, "incrementally_remove_document"
+    )
+
+    removed = []
+
+    for name in names:
+        try:
+            incrementally_remove_document(name)
+            removed.append(name)
+
+        except Exception as error:
+            removed.append(f"FAILED:{name}:{type(error).__name__}")
+
+    return removed
+
+
+def _ingest(engine, corpus_dir):
+    """
+    Index the whole corpus through the real single-document path.
+
+    `incrementally_index_document` is the path that writes memory and
+    SQLite together, so it is the one whose transaction order this
+    milestone must not change.
+    """
+
+    incrementally_index_document = _get(
+        engine, "incrementally_index_document"
+    )
+
+    indexed = []
+
+    for path in sorted(Path(corpus_dir).iterdir()):
+
+        if not path.is_file():
+            continue
+
+        try:
+            incrementally_index_document(path.name, str(path))
+            indexed.append(path.name)
+
+        except Exception as error:
+
+            # A document the engine refuses is part of the observable
+            # behaviour and must match too.
+            indexed.append(f"FAILED:{path.name}:{type(error).__name__}")
+
+    return indexed
+
+
+def run_phase(engine, data_dir, corpus_dir, phase, deletes=()):
+    """Run one phase and return its dump."""
+
+    report = {
+        "phase": phase,
+        "data_dir": str(data_dir),
+        "requested_deletes": list(deletes),
+    }
+
+    if phase == "ingest":
+
+        report["indexed"] = _ingest(engine, corpus_dir)
+
+        report["removed"] = _delete(engine, deletes) if deletes else []
+
+        # Exercise the full-sync path as well as the incremental one, so
+        # the comparison covers both writers.
+        sync_sqlite_from_memory = _get(engine, "sync_sqlite_from_memory")
+
+        sync_sqlite_from_memory()
+
+        save_database = _get(engine, "save_database")
+
+        save_database()
+
+    report["containers"] = _snapshot_containers(engine)
+    report["sqlite"] = _dump_sqlite(data_dir)
+    report["json_files"] = _dump_json_files(data_dir)
+
+    status = _get(engine, "INDEX_STATUS")
+
+    report["status"] = {
+        "state": status.get("state"),
+        "generation": status.get("generation"),
+    }
+
+    return report
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--engine", choices=("new", "legacy"), required=True)
+    parser.add_argument("--base", default=None)
+    parser.add_argument("--data", required=True)
+    parser.add_argument("--corpus", required=True)
+    parser.add_argument("--phase", choices=PHASES, required=True)
+    parser.add_argument("--delete", action="append", default=[])
+    parser.add_argument("--out", required=True)
+
+    arguments = parser.parse_args(argv)
+
+    os.environ["SEARCH_ENGINE_DATA_DIR"] = str(arguments.data)
+
+    # The engine resolves its data folder at import, so this must be set
+    # before the module is loaded.
+    sys.path.insert(0, str(REPO_ROOT))
+
+    if arguments.engine == "legacy":
+        if not arguments.base:
+            raise ProbeError("--base is required for the legacy engine")
+
+        engine = _load_legacy_engine(arguments.base)
+    else:
+        engine = _load_engine()
+
+    report = run_phase(
+        engine,
+        arguments.data,
+        arguments.corpus,
+        arguments.phase,
+        deletes=arguments.delete,
+    )
+
+    Path(arguments.out).write_text(
+        json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

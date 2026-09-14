@@ -27,13 +27,15 @@ this work was done. See [Status](#status) for exactly what is real.
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| Flask search API | **Working** | 179 tests pass with the server running |
-| `search_engine/` extraction | **In progress** | 3 of 6 layers; app.py 4085 -> 3327 lines; index ownership fully copy-on-write |
+| Flask search API | **Working** | 207 tests pass with the server running |
+| `search_engine/` extraction | **In progress** | 4 of 6 layers; app.py 4085 -> 3025 lines; storage is Flask-free and parity-proven |
 | Ranking engine | **Working** | 79/79 golden vectors, exact binary64 |
 | React web UI | **Working** | builds cleanly; live search verified through the proxy |
-| Test suite | **Working** | 179 pass with a server; 170 pass + 9 skip without one |
+| Test suite | **Working** | 207 pass with a server; 198 pass + 9 skip without one |
 | Shadow parity gate | **Working** | 21,365 comparisons, 0 differences |
 | Memory mutation coherence | **Closed** | copy-on-write publish; 20 tests, all 5 negative controls confirmed |
+| Persistence extraction | **Done** | 230,538 values compared vs monolith, 0 differences |
+| Filename order across restart | **Broken, pre-existing** | tokens persisted from a `set`; a quoted filename phrase stops matching after a restart |
 | JVM semantics | **Verified** | real JVM: 0 genuine divergences, rounding exact |
 | Golden vector gate | **Working** | catches drift; proven by negative control |
 | Corpus sidecar | **Generated** | 13 documents, 191 terms, integrity hash verified |
@@ -182,6 +184,12 @@ tools/
   verify_golden_vectors.py   The parity gate
   build_corpus_sidecar.py    Builds the Android bootstrap artifact
   port_model.py              Executable model of the Kotlin ports
+  extract_modules.py         Slices modules out of app.py by AST line range
+  storage_extraction_spec.py The persistence layer's extraction spec
+  shadow_parity.py           Extracted functions vs the originals
+  mutation_equivalence.py    Copy-on-write planners vs the in-place helpers
+  storage_probe.py           Dumps one engine session for comparison
+  storage_equivalence.py     Reconstruction parity vs the monolith
 tests/
   test_phase12_live.py       Live HTTP regression suite
   test_tokenizer_contract.py Unicode, sanitizer and query contracts
@@ -189,6 +197,9 @@ tests/
   test_golden_vectors.py     Full vector replay
   test_restart_recovery.py   Restart, bulk delete and rebuild
   test_port_model.py         Verifies the Kotlin port algorithms
+  test_index_state.py        Index ownership and torn-read guards
+  test_memory_mutation_atomicity.py  Copy-on-write publication and its AST guards
+  test_storage_parity.py     Reconstruction parity and transport independence
   golden/                    The golden vectors
 artifacts/android/
   corpus_sidecar.json        Extracted corpus for the Android bootstrap
