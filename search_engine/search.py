@@ -777,7 +777,7 @@ def search_documents(
                 #
                 # Reference points:
                 #   1 occurrence  -> 50.0
-                #   2 occurrences -> ~57.5
+                #   2 occurrences -> ~60.8
                 #   7 occurrences -> ~80.4
                 #   16 occurrences -> ~93.1
                 #   25 occurrences -> 100.0

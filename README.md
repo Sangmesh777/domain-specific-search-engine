@@ -34,7 +34,7 @@ Stated plainly, because "designed" and "working" are different claims:
 | `search_engine/` core | **Implemented and tested.** Transport-independent, no web-stack imports, AST-enforced. |
 | Flask HTTP API | **Implemented and tested.** Adapters only; domain logic in routes is AST-enforced absent. |
 | React frontend | **Present**, drives the HTTP API. |
-| Regression suite | **253 tests passing** across 7 suites, including live-HTTP tests. |
+| Regression suite | **263 tests passing** across 7 suites, including live-HTTP tests. |
 | Parity vs the pre-refactor monolith | **Verified**: 90 checks, 0 mismatches against commit `81faff9`. |
 | Golden vectors (ranking contract) | **Published and drift-gated**: 6 documents, 50 cases. |
 | Pre-extracted Android corpus | **Published and drift-gated**: 13 documents. |
@@ -79,7 +79,7 @@ server owns no documents, runs pytest, and stops the API again:
 ```
 
 ```text
-253 passed
+263 passed
 ```
 
 The live-HTTP suite is **skipped, never silently passed**, when no server is
@@ -90,12 +90,12 @@ the equivalent path.
 | Suite | Count | Needs a server? | Covers |
 | --- | --- | --- | --- |
 | `tests/test_core_units.py` | 94 | no | Tokenizer, filenames, snippets, pagination, storage |
-| `tests/test_search_engine_core.py` | 99 | no | Engine API, determinism, delete/rebuild semantics, crash recovery, adapter boundary |
+| `tests/test_search_engine_core.py` | 105 | no | Engine API, determinism, delete/rebuild semantics, crash recovery, reachability thresholds and the phrase-frequency tail, adapter boundary |
 | `tests/test_parity_tool.py` | 19 | no | The parity tool's own diff classifier |
 | `tests/test_golden_vectors.py` | 9 | no | Drift gate on the published ranking contract |
 | `tests/test_corpus_sidecar.py` | 6 | no | The pre-extracted corpus artifact and offline indexing path |
 | `tests/test_phase12_live.py` | 18 | **yes** | Public HTTP API end to end, invalid input, access boundaries |
-| `tests/test_vector_coverage_tool.py` | 8 | no | The coverage tool's enumeration and its restore guarantee |
+| `tests/test_vector_coverage_tool.py` | 12 | no | The coverage tool's enumeration, its restore guarantee, and the full-sweep taxonomy gate (no constant left unclassified or live-uncovered) |
 
 ## HTTP API
 
@@ -175,7 +175,10 @@ ranking constants. It answers a question the contract cannot answer about
 itself — what could a reimplementation get wrong and still reproduce the vectors
 exactly — by perturbing each numeric constant in `search_engine/search.py` and
 reporting which ones move a recorded payload. Current result: 106 constants, 74
-pinned, 32 accounted for in [ANDROID.md](ANDROID.md) §9.
+pinned; the 32 the vectors cannot reach are classified in the tool itself — 17
+not ranking values, 5 provably inert, 10 pinned by named falsified engine
+tests, **0 live and uncovered** — and the suite gates that taxonomy, so it
+cannot rot. [ANDROID.md](ANDROID.md) §9 publishes the full accounting.
 
 ## Performance
 

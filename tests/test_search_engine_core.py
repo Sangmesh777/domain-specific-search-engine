@@ -19,6 +19,7 @@ ghost posting behind.
 """
 
 import io
+import math
 import os
 import shutil
 import sqlite3
@@ -3422,6 +3423,207 @@ def test_numeric_similarity_floor_is_pinned(engine):
     # 2 of 12 characters is a 0.1667 ratio; 0.1667 * 0.70 = 0.1167, which is
     # under the floor, so 0.20 is reported.
     assert clamp_result(engine, "12")["numeric_similarity"] == 0.2
+
+
+# ============================================================
+# REACHABILITY THRESHOLDS AND THE PHRASE-FREQUENCY TAIL
+#
+# Constants the six-document vector corpus can never reach:
+# query-shape gates (minimum word lengths, minimum quoted-query
+# length) and the phrase-frequency tail (two-plus occurrences, the
+# 25-occurrence reference cap). tools/verify_vector_coverage.py
+# reports every one of these as NOT PINNED BY THE VECTORS; they are
+# pinned here instead, and each test was falsified by perturbing
+# the exact constant it names. ANDROID.md section 9 keeps the
+# full classification of all 32 vector-unpinned constants.
+# ============================================================
+
+
+def test_prefix_match_requires_a_three_character_word(engine):
+    """
+    The prefix gate is `len(word) >= 3`, and both sides are observable.
+
+    "dat" is 3 of the 8 characters of "database", so it passes the gate
+    with a 0.375 ratio. "da" is 2 characters, so the gate refuses it
+    before any similarity is computed - and nothing else matches either,
+    so the page comes back empty. Raising the gate to 4 kills the "dat"
+    row; lowering it to 2 gives "da" a row at the 0.25 floor.
+    """
+
+    engine.index_extracted(
+        "notes.txt",
+        "database migration guide",
+        [{"page": 1, "text": "database migration guide"}],
+    )
+
+    assert clamp_result(engine, "dat")["prefix_similarity"] == 0.375
+
+    assert engine.search("da")["results"] == []
+
+
+def test_single_word_quoted_query_still_takes_the_quoted_path(engine):
+    """
+    Quote detection is `len(query) >= 2` plus surrounding double quotes,
+    so even the three-character query '"z"' is a quoted search.
+
+    A one-word phrase never sets phrase_query (that needs two or more
+    phrase words), and "z" is not a substring of "beta txt", so the
+    filename-phrase bonus cannot fire either. The quoted filter then
+    finds no phrase_match documents and answers with the legacy bare
+    list - while the same word unquoted answers with the normal
+    paginated page. Raising the detection length to 4 or more makes
+    '"z"' unquoted and this test fails on the response shape.
+
+    Detection lengths 1, 2 and 3 are provably identical in behavior:
+    the only queries that differ between them ('"' and '""') yield an
+    empty quoted phrase, and every downstream guard (`if
+    quoted_phrase:`) treats that exactly like no quote at all. The
+    exact value 2 is therefore unpinnable by ANY test; this pins the
+    observable boundary.
+    """
+
+    engine.index_extracted(
+        "beta.txt",
+        "alpha beta gamma",
+        [{"page": 1, "text": "alpha beta gamma"}],
+    )
+
+    assert engine.search('"z"') == []
+
+    unquoted = engine.search("z")
+
+    assert isinstance(unquoted, dict)
+    assert unquoted["results"] == []
+
+
+def test_minimal_quoted_phrase_scores_through_the_quoted_only_branch(engine):
+    """
+    The shortest quoted phrase that reaches phrase scoring at all:
+    two words, one occurrence, no filename signal - weights
+    .05/.15/.80. filename_relevance is 0, content_relevance is 1.0
+    (single document, normalized by the max), and phrase_relevance is
+    50/100 = 0.5, so the published score is 0.15 + 0.80 * 0.5 = 0.55
+    exactly. Were the query to lose its quoted status, the normal
+    branch weights .05/.60/.20/.15 would publish a different score.
+    """
+
+    engine.index_extracted(
+        "notes.txt",
+        "alpha beta gamma",
+        [{"page": 1, "text": "alpha beta gamma"}],
+    )
+
+    row = clamp_result(engine, '"alpha beta"')
+
+    assert row["phrase_occurrences"] == 1
+    assert row["phrase_score"] == 50.0
+    assert row["score"] == 0.55
+
+
+def test_phrase_frequency_branch_starts_at_two_occurrences(engine):
+    """
+    `if phrase_occurrences <= 1` pinned from both sides of the boundary.
+
+    One occurrence takes the flat 50.0. Two occurrences take the
+    logarithmic curve: 50 + 50 * ln(2)/ln(25) = 60.7669 rounded. Moving
+    the boundary to <= 2 collapses the second document to 50.0 and this
+    test fails. Moving it to <= 0 is provably unobservable: the branch
+    only runs when occurrences > 0, and at 1 occurrence the curve
+    itself yields 50 + 50 * ln(1)/ln(25) = 50.0.
+
+    The expected value is computed from math.log, not transcribed: the
+    engine's own reference comment used to claim ~57.5 here, which the
+    curve never produced.
+    """
+
+    engine.index_extracted(
+        "notes-one.txt",
+        "alpha beta gamma delta",
+        [{"page": 1, "text": "alpha beta gamma delta"}],
+    )
+    engine.index_extracted(
+        "notes-two.txt",
+        "alpha beta gamma alpha beta delta",
+        [{"page": 1, "text": "alpha beta gamma alpha beta delta"}],
+    )
+
+    page = engine.search('"alpha beta"')
+
+    rows = {row["title"]: row for row in page["results"]}
+
+    assert rows["notes-one.txt"]["phrase_occurrences"] == 1
+    assert rows["notes-one.txt"]["phrase_score"] == 50.0
+
+    expected_two = round(
+        50.0 + 50.0 * math.log(2) / math.log(25),
+        4,
+    )
+
+    assert expected_two == 60.7669
+
+    assert rows["notes-two.txt"]["phrase_occurrences"] == 2
+    assert rows["notes-two.txt"]["phrase_score"] == expected_two
+
+
+def test_phrase_frequency_ratio_caps_at_the_reference(engine):
+    """
+    `frequency_ratio = min(ln(n)/ln(25), 1.0)` and the score cap
+    `min(content_phrase_score, 100.0)`, pinned at and past the
+    25-occurrence reference.
+
+    25 occurrences -> ratio exactly 1.0 -> score exactly 100.0.
+    50 occurrences -> the raw ratio would be ln(50)/ln(25) = 1.0879,
+    but the cap holds it at 1.0 -> also 100.0. Lowering the ratio cap
+    (say to 0.9) reports 95.0 for both documents; lowering the score
+    cap below 100 clips the exact 100.0 they produce. Raising the
+    ratio cap is unobservable only because the score cap catches the
+    overshoot - the two caps are a documented pair (ANDROID.md 9).
+    """
+
+    engine.index_extracted(
+        "cap25.txt",
+        "alpha beta " * 25,
+        [{"page": 1, "text": "alpha beta " * 25}],
+    )
+    engine.index_extracted(
+        "cap50.txt",
+        "alpha beta " * 50,
+        [{"page": 1, "text": "alpha beta " * 50}],
+    )
+
+    page = engine.search('"alpha beta"')
+
+    scores = {
+        row["title"]: row["phrase_score"]
+        for row in page["results"]
+    }
+
+    assert scores == {"cap25.txt": 100.0, "cap50.txt": 100.0}
+
+
+def test_numeric_similarity_is_rounded_to_four_places(engine):
+    """
+    The published numeric_similarity is round(raw, 4), and this is a
+    shape where the rounding actually bites: "7777" is 4 of the 13
+    characters of "report7777777", so raw = (4/13) * 0.70 =
+    0.2153846... and the published value must be 0.2154. At three
+    places it would read 0.215; unrounded it would carry the full
+    float. The multiplier test (0.318181... -> 0.3182) exercises the
+    same round; this one names the precision directly.
+    """
+
+    engine.index_extracted(
+        "memo.txt",
+        "see report7777777 for details",
+        [{"page": 1, "text": "see report7777777 for details"}],
+    )
+
+    raw = (4 / 13) * 0.70
+
+    # The chosen lengths must be able to bite, or the test proves nothing.
+    assert round(raw, 4) != round(raw, 3)
+
+    assert clamp_result(engine, "7777")["numeric_similarity"] == round(raw, 4)
 
 
 def test_search_after_restart_matches_search_before_it(

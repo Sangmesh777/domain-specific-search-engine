@@ -52,17 +52,17 @@ Extra pytest arguments are forwarded:
 
 ## Test suites
 
-253 tests in total.
+263 tests in total.
 
 | Suite | Count | Needs a server? | What it covers |
 | --- | --- | --- | --- |
 | `tests/test_core_units.py` | 94 | no | Individual core modules: tokenizer, filenames, snippets, pagination, storage |
-| `tests/test_search_engine_core.py` | 99 | no | `SearchEngine` public API, determinism, rebuild and delete semantics, adapter boundary |
+| `tests/test_search_engine_core.py` | 105 | no | `SearchEngine` public API, determinism, rebuild and delete semantics, reachability thresholds and the phrase-frequency tail, adapter boundary |
 | `tests/test_parity_tool.py` | 19 | no | The parity tool's own diff classifier, in both directions |
 | `tests/test_golden_vectors.py` | 9 | no | Drift gate on the published golden vectors |
 | `tests/test_corpus_sidecar.py` | 6 | no | The pre-extracted corpus artifact and the offline indexing path |
 | `tests/test_phase12_live.py` | 18 | yes | Public HTTP API end to end, including invalid input and access boundaries |
-| `tests/test_vector_coverage_tool.py` | 8 | no | The coverage tool's enumeration, perturbation sizing, and its guarantee that it restores `search.py` byte for byte |
+| `tests/test_vector_coverage_tool.py` | 12 | no | The coverage tool's enumeration, perturbation sizing, its guarantee that it restores `search.py` byte for byte, and the full-sweep taxonomy gate |
 
 The live suite is **skipped**, never silently passed, when no server is
 reachable at `http://127.0.0.1:5000`. Run `./run_tests.sh` so the gate
@@ -185,10 +185,11 @@ assertion.
 - Golden vectors and the corpus sidecar cannot drift from the engine unnoticed
 - 74 of the 106 numeric constants in `search_engine/search.py` are pinned by the
   golden vectors, measured by `tools/verify_vector_coverage.py`. The other 32
-  are accounted for by group in ANDROID.md: 18 are not ranking values, 3 are
-  structurally dead, 3 are live constants pinned by engine tests instead, and 8
-  are live thresholds and ceilings the six-document corpus cannot reach, which
-  a port must copy by inspection
+  carry a machine-readable classification the suite gates on every run: 17 are
+  not ranking values, 5 are provably inert, 10 are live constants pinned by
+  named falsified engine tests, and none is live-and-uncovered — a constant
+  that loses its test, moves its line, or starts being pinned by the vectors
+  fails the gate until the map and ANDROID.md §9 are updated deliberately
 - A rebuild that fails partway leaves the previous snapshot serving, and a
   restart after a crash mid-rebuild comes back READY and searchable rather
   than wedged on a persisted INDEXING or ERROR

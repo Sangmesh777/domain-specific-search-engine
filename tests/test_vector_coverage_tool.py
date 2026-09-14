@@ -7,9 +7,14 @@ only safe if it reliably puts it back, so the restoration guarantee is tested
 here rather than trusted - a sweep interrupted or raising halfway must not leave
 the repository with edited ranking constants.
 
-A full sweep is roughly twenty seconds, which is too slow for the regression
-gate, so these tests exercise the helpers and run the sweep only through a
-filter narrow enough to stay fast.
+A full sweep is roughly thirty seconds, so the helper tests here exercise the
+sweep only through filters narrow enough to stay fast - with exactly one
+deliberate exception. test_full_sweep_taxonomy_is_exact runs the whole sweep
+and gates the published classification of every unpinned constant (74 pinned,
+A 17, B 5, C 10, D 0, E 0, nothing stale, drifted, or unclassified). That is
+the enforcement behind "never silently leave live behavior uncovered": the
+slow gate is the point, and any legitimate change that moves those numbers
+must update the test and ANDROID.md section 9 deliberately.
 """
 
 import os
@@ -22,6 +27,8 @@ TOOLS = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "tools",
 )
+
+ROOT = os.path.dirname(TOOLS)
 
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
@@ -225,3 +232,133 @@ def test_a_pinned_constant_reports_as_differing():
     finally:
 
         assert source_text() == before
+
+
+def test_classification_map_matches_the_live_source():
+    """
+    Static staleness guard, fast enough to run every time: every classified
+    line must still hold a constant with the expected value and anchor text.
+    A map that outlives the code it describes would otherwise classify
+    whatever now happens to sit on that line.
+    """
+
+    _source, found = coverage.constants()
+
+    by_line = {}
+
+    for item in found:
+        by_line.setdefault(item["lineno"], []).append(item)
+
+    assert coverage.CLASSIFICATIONS, "the map must not be empty"
+
+    for lineno, entry in sorted(coverage.CLASSIFICATIONS.items()):
+
+        assert lineno in by_line, (
+            f"line {lineno} holds no numeric constant anymore"
+        )
+
+        assert entry["category"] in coverage.CATEGORY_LABELS
+
+        match = [
+            item for item in by_line[lineno]
+            if item["value"] == entry["value"]
+            and entry["anchor"] in item["line"]
+            and (
+                "name" not in entry
+                or item["name"] == entry["name"]
+            )
+        ]
+
+        assert match, (
+            f"line {lineno}: no constant {entry['value']!r} "
+            f"with anchor {entry['anchor']!r}"
+        )
+
+
+def test_no_live_behavior_is_left_uncovered():
+    """
+    Category D - live, reachable, pinned by nothing - must be empty. That is
+    the whole point of the taxonomy, so it is asserted directly rather than
+    only through the full-sweep counts.
+    """
+
+    uncovered = [
+        lineno
+        for lineno, entry in coverage.CLASSIFICATIONS.items()
+        if entry["category"] == "D"
+    ]
+
+    assert uncovered == [], (
+        f"live constants pinned by nothing: {uncovered}"
+    )
+
+
+def test_every_c_classification_names_real_tests():
+    """
+    A category-C entry claims an engine test pins the constant. If that test
+    is deleted or renamed, the claim rots silently - so every cited name must
+    exist in the core suite.
+    """
+
+    path = os.path.join(
+        ROOT, "tests", "test_search_engine_core.py"
+    )
+
+    with open(path, encoding="utf-8") as file:
+        suite = file.read()
+
+    cited = 0
+
+    for lineno, entry in sorted(coverage.CLASSIFICATIONS.items()):
+
+        if entry["category"] != "C":
+            continue
+
+        assert entry.get("tests"), (
+            f"line {lineno}: category C without test names"
+        )
+
+        for name in entry["tests"]:
+            assert f"def {name}(" in suite, (
+                f"line {lineno} cites missing test {name}"
+            )
+            cited += 1
+
+    assert cited >= 10, cited
+
+
+def test_full_sweep_taxonomy_is_exact():
+    """
+    The slow gate (~30 s): run the entire perturbation sweep and hold the
+    published accounting. Any legitimate change to search.py or the vectors
+    that moves these numbers must update this test and ANDROID.md section 9
+    deliberately - the failure message is the reminder.
+    """
+
+    before = source_text()
+
+    try:
+
+        _committed, rows = coverage.sweep()
+
+        report = coverage.classify(rows)
+
+    finally:
+
+        assert source_text() == before, (
+            "the full sweep left search_engine/search.py modified"
+        )
+
+    assert report["errors"] == [], report["errors"]
+    assert report["stale"] == [], report["stale"]
+    assert report["drifted"] == [], report["drifted"]
+    assert report["unclassified"] == [], report["unclassified"]
+
+    assert report["pinned"] == 74, report["pinned"]
+
+    counts = {
+        category: len(entries)
+        for category, entries in report["categorized"].items()
+    }
+
+    assert counts == {"A": 17, "B": 5, "C": 10, "D": 0, "E": 0}, counts

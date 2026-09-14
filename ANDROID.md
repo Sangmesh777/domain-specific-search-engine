@@ -777,68 +777,89 @@ pinned when nothing lands between them), and every regeneration runs with `-B`
 after purging `__pycache__`, because a same-size edit inside one wall-clock
 second is otherwise served from stale bytecode and reports a false negative.
 
-The 32 unpinned constants fall into four groups. The last one is the group a
-port implementer must read, because those numbers are live ranking behaviour
-that nothing verifies.
+The 32 unpinned constants are classified in the tool itself — a
+machine-readable map (`CLASSIFICATIONS` in `tools/verify_vector_coverage.py`),
+not just prose — into the five categories the port contract defines:
 
-**1. Not ranking values at all — 18.** Argument defaults (`requested_page=1`,
+| Category | Meaning | Count |
+| --- | --- | --- |
+| A | Not a ranking value at all | 17 |
+| B | Structurally inert: cannot change any output, proof recorded | 5 |
+| C | Live ranking behavior, pinned by named falsified engine tests | 10 |
+| D | Live and uncovered — **must stay empty** | 0 |
+| E | Intentionally excluded from pinning | 0 |
+
+The classification cannot rot silently, because
+`tests/test_vector_coverage_tool.py` runs the full sweep inside the regression
+gate and fails on any stale, drifted, unclassified, or category-D constant:
+each entry records the expected value and a source anchor (a line that moves
+or changes reports as stale), each C entry names real tests in the core suite
+(verified by name — a deleted test fails the gate), and a constant the vectors
+start pinning reports as drift.
+
+**A — not ranking values (17).** Argument defaults (`requested_page=1`,
 `requested_limit=10`, which every case overrides explicitly), accumulator
-initialisers (`current_weight = 0.0`, `max_content_score = 0.0`,
-`best_prefix_similarity = 0.0`, `query_word_coverage = 0.0`), division guards
-(`if total_documents == 0`, `if total_words == 0`), the `or 0.0` defaults inside
-three `round()` calls, and the `== 0` tests in the filter that drops unscored
-documents.
+initialisers (`current_weight`, `max_content_score` twice,
+`best_prefix_similarity`, `best_numeric_similarity`, `query_word_coverage`),
+division and early-return guards (`total_documents == 0`, `total_words == 0`,
+`filename_score > 0`), the `.get(..., 0.0)` defaults inside the published
+rounds (ranked rows always set those fields), and the three `== 0` tests in
+the filter that drops unscored documents.
 
-**2. Structurally dead — 3.** They cannot affect any output, whatever the
-corpus:
+**B — structurally inert (5).** They cannot affect any output, whatever the
+corpus, and each proof is recorded in the map:
 
 | Constant | Why it has no effect |
 | --- | --- |
-| `filename_weight = 0.05` (quoted-only branch) | That branch is entered only when no document scored on the filename, which forces `filename_relevance` to `0.0` for every document. The weight multiplies zero. Confirmed by tracing both locals across all 50 cases. |
+| `len(word) > 1` content-word gate (line 199) | Redundant: the tokenizer indexes no one-character terms, the prefix gate needs ≥ 3 characters, the numeric gate ≥ 2 digits. Verified empirically — perturbing it to `> 0` survives the full core suite. |
+| `final_score = 0.75` (filetype-only query) | A keep-alive, not a ranking value. Those queries publish a hardcoded relevance of `1.0`; `0.75` only has to be positive to clear the `final_score <= 0` filter. |
+| `filename_weight = 0.05` (quoted-only branch) | The branch runs only when no document scored on the filename, which forces `filename_relevance` to `0.0` for every document. The weight multiplies zero. |
 | `filename_weight = 0.05` (ordinary branch) | Same argument, same branch condition. |
-| `final_score = 0.75` (filetype-only query) | A keep-alive, not a ranking value. Those queries publish a hardcoded `relevance_score` of `1.0`; `0.75` only has to be positive to clear the `final_score <= 0` filter. |
+| `round(filename_score, 4)` precision (line 1421) | `filename_score` is always a multiple of 10 (initialised `0.0`, incremented only by `100.0`/`50.0`/`20.0`), so the round can never bite. Verified empirically — precision 3 survives the full core suite. |
 
-Copy these faithfully anyway. They are dead because of a branch condition, and a
-port that restructures the branches could revive them.
+Copy these faithfully anyway. They are inert because of branch conditions and
+upstream gates, and a port that restructures either could revive them.
 
-**3. Live constants pinned by engine tests instead — 3.** Real ranking values
-the six-document corpus cannot reach, so `tests/test_search_engine_core.py`
-holds them using terms built specifically to land on each:
+**C — live constants pinned by falsified engine tests (10).** Real ranking
+behavior the six-document corpus cannot reach, so
+`tests/test_search_engine_core.py` holds them with terms built specifically to
+land on each. Every one was falsified: the constant it names was perturbed
+(bytecode purged, `-B`) and the test confirmed to fail, in both directions
+where a direction is observable at all.
 
-| Constant | Expression | Why the corpus misses it |
-| --- | --- | --- |
-| `0.25` | `min(0.90, max(0.25, len(word)/len(term)))` | Needs a term more than 4× the query word. |
-| `0.65` | `min(0.65, max(0.20, ratio * 0.70))` | Needs a numeric run filling ≥ 92.9% of a term. |
-| `0.70` | the multiplier in that same expression | The corpus's only numeric-substring query is `777` inside `unique777marker`, ratio 0.2, whose product 0.14 sits under the floor — so it reports 0.20 whatever the multiplier is. |
-
-Adding documents would have covered these, but it changes `total_documents`,
-which shifts IDF and rewrites every recorded content score. Trading a frozen
-contract for three constants is the wrong way round.
-
-**4. Live thresholds and ceilings the corpus cannot reach, with no engine test
-yet — 8. Copy these by inspection.** This is the residual risk in the contract
-and it is stated plainly rather than buried:
-
-| Line | Constant | What it governs | Why unreachable |
+| Line | Constant | Pinned by | Notes |
 | --- | --- | --- | --- |
-| 168 | `len(query) >= 2` | minimum length to treat a query as quoted | no 2-character quoted case |
-| 535 | `len(word) >= 3` | minimum word length for prefix matching | no case where moving the bound adds or drops a match |
-| 572 | `len(word) >= 2` | minimum digits for numeric substring | `777` has 3 digits; only a 2-digit query distinguishes 2 from 3, and the engine test for the numeric floor supplies one |
-| 790 | `phrase_occurrences <= 1` | single-occurrence phrase score of 50.0 | the repeated phrase occurs 3 times and singles occur once, so no document sits at exactly 2 |
-| 804 | `frequency_ratio` ceiling `1.0` | caps repetition bonus | needs `phrase_occurrences >= 25`; the maximum here is 3, giving ratio 0.341 |
-| 819 | `content_phrase_score` ceiling `100.0` | caps the phrase score | the maximum reached is `50 + 50*0.341 = 67.1` |
-| 1421 | `round(..., 4)` precision | rounding of one published field | that field is always exact at 4 decimals in these cases, so a 5th digit adds nothing |
-| 1451 | `round(..., 4)` precision | rounding of another published field | same reason |
+| 168 | `len(query) >= 2` (quote detection) | `test_single_word_quoted_query_still_takes_the_quoted_path` | Kills thresholds ≥ 4 (`'"z"'` would lose its bare-list shape). Lengths 1–3 are provably identical: the only queries that differ (`'"'`, `'""'`) yield an empty quoted phrase, falsy at every `if quoted_phrase:` guard — so the exact value 2 is unpinnable by any test, and the test pins the observable boundary. |
+| 535 | `len(word) >= 3` (prefix gate) | `test_prefix_match_requires_a_three_character_word` | Both directions: `3→4` drops the `"dat"` row (0.375), `3→2` adds a `"da"` row. |
+| 557 | prefix floor `0.25` | `test_prefix_similarity_floor_is_pinned` | Needs a term more than 4× the query word. |
+| 572 | `len(word) >= 2` (numeric digits) | `test_numeric_similarity_floor_is_pinned` | The `"12"` query kills ≥ 3; the ≥ 1 direction is inert — line 199 drops one-character words before they arrive. |
+| 594 | numeric ceiling `0.65` | `test_numeric_similarity_ceiling_is_pinned` | Needs a numeric run filling ≥ 92.9% of a term. |
+| 597 | numeric multiplier `0.70` | `test_numeric_similarity_multiplier_is_pinned` | The corpus's only numeric-substring case reports the floor whatever the multiplier is. |
+| 790 | `phrase_occurrences <= 1` | `test_phrase_frequency_branch_starts_at_two_occurrences` | Kills `<= 2`: the two-occurrence document collapses from 60.7669 to 50.0. `<= 0` is provably identical — the branch runs only when occurrences > 0, and ln(1) = 0 gives 50.0 on the curve too. |
+| 804 | frequency-ratio cap `1.0` | `test_phrase_frequency_ratio_caps_at_the_reference` | Kills lower caps (0.9 → 95.0 at 25 and 50 occurrences). Higher caps are observable only together with line 819, which catches the overshoot. |
+| 819 | phrase-score cap `100.0` | `test_phrase_frequency_ratio_caps_at_the_reference` | Kills caps below 100 (min(100.0, 99.0) clips the exact-100.0 score). Above 100 is provably inert: the input can never exceed 100.0 (branch one gives 50.0, branch two 50 + 50·min(ratio, 1.0)). The two caps are a documented pair. |
+| 1451 | `round(numeric_similarity, 4)` | `test_numeric_similarity_is_rounded_to_four_places`, `test_numeric_similarity_multiplier_is_pinned` | Raw 0.2153846… publishes 0.2154; precision 3 kills both tests. |
 
-The five other `round(..., 4)` calls **are** pinned, which is the important part
-for §4.1: the vectors do detect a change to the rounding precision wherever a
-recorded value has a non-zero 5th digit. A port must still implement Python's
-`round()` semantics exactly (binary value, half-to-even) rather than decimal
-HALF_UP; the vectors expose that on those five fields.
+Adding vector cases instead would have meant changing the corpus, which
+changes `total_documents`, shifts IDF, and rewrites every recorded content
+score. Trading a frozen contract for constants a test can reach is the wrong
+way round; the tests pin the behavior without touching the contract.
 
-Group 4 is the honest answer to "what could a port get wrong and still pass?".
-Eight numbers, each with a stated reason, each worth an engine test if the port
-is going to depend on them rather than transcribe them.
+**D — live and uncovered: none, and the gate keeps it that way.** This was
+not always true: eight constants sat in this group when the accounting was
+first written ("copy these by inspection"). Each now has either a falsified
+engine test (168, 535, 790, 804, 819, 1451 — plus 572, which the
+numeric-floor test had already covered before the map existed) or a recorded
+inertness proof (1421 and 199 moved to B). A port no longer has to copy any
+ranking value by inspection alone.
+
+Five of the seven published `round(..., 4)` calls are pinned by the vectors
+themselves, which is the important part for §4.1: the vectors do detect a
+change to the rounding precision wherever a recorded value has a non-zero 5th
+digit. A sixth (numeric_similarity) is pinned by the engine tests above; the
+seventh (filename_score) is provably inert. A port must still implement
+Python's `round()` semantics exactly (binary value, half-to-even) rather than
+decimal HALF_UP; the vectors expose that on those five fields.
 
 Absolute paths are written as `{{data_folder}}` so the file is meaningful
 outside this repository.
@@ -941,15 +962,16 @@ corpus, and it needs no parser.
 ## Appendix: reproduction
 
 ```bash
-# The regression gate (253 tests: unit, core, live HTTP including invalid
+# The regression gate (263 tests: unit, core, live HTTP including invalid
 # input and access boundaries, parity tool, golden vectors, corpus sidecar)
 ./run_tests.sh
 
 # Regenerate the golden vectors
 .venv/bin/python tools/export_golden_vectors.py
 
-# Measure which ranking constants the vectors actually pin, and list every
-# one they cannot reach. Reports; does not gate. Takes ~20s.
+# Measure which ranking constants the vectors actually pin and classify every
+# one they cannot reach (categories A-E). The tool reports; the suite gates -
+# test_full_sweep_taxonomy_is_exact runs the whole sweep (~30s).
 .venv/bin/python tools/verify_vector_coverage.py
 
 # Regenerate the pre-extracted corpus sidecar for offline Android
