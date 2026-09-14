@@ -99,6 +99,104 @@ with `generation: 1`, so a process death during a rebuild can never
 leave the application wedged in `INDEXING`. This is asserted by
 `tests/test_restart_recovery.py`.
 
+## Module extraction (in progress)
+
+`app.py` was a 4093-line monolith. It is being decomposed into
+`search_engine/`, with `app.py` becoming a thin Flask adapter. Two
+layers are done:
+
+| Module | Contents | Lines moved |
+| --- | --- | --- |
+| `search_engine/text.py` | `tokenize`, `tokenize_filename`, `normalize_search_query`, `parse_filetype_filter` | 220 |
+| `search_engine/sanitize.py` | `sanitize_upload_filename` | |
+| `search_engine/extract.py` | `count_phrase_occurrences`, `extract_text`, `extract_pages` | 605 |
+| `search_engine/snippet.py` | `build_snippet_result`, `get_snippet_and_page` | |
+
+`app.py` is down from 4093 to 3289 lines.
+
+### How the extraction is kept safe
+
+Two tools, both wired into `run_tests.sh`:
+
+**`tools/extract_modules.py`** slices the exact source segments out of
+`app.py` using the AST and rewrites `app.py` to import them. Function
+bodies are never retyped, so they cannot drift through transcription. It
+also applies declared transforms (adding a leading parameter, renaming a
+module global to it, rewriting call sites) and refuses to run if a call
+site it must patch has moved. It is incremental, so one layer can be
+moved without redoing the previous ones.
+
+**`tools/shadow_parity.py`** is the gate. The golden vectors only catch a
+change in *results*, for inputs someone wrote down. Shadow parity loads
+the original bodies from a pinned git revision and compares them against
+the extracted implementations over the recorded vectors, adversarial
+inputs, a deterministic random corpus spanning the astral plane, and
+structured cases for multi-page documents, window sizes and missing
+documents.
+
+Current result: **10 functions, 21,365 comparisons, 0 differences.**
+
+If a function is extracted and not added to `EXTRACTED` in
+`tools/shadow_parity.py`, the gate stops covering it — which is why
+`tests/test_shadow_parity.py` asserts the exact expected function set.
+
+### Making global state explicit
+
+`get_snippet_and_page` read the module global `PAGE_TEXT_INDEX`. It now
+takes `page_text_index` as its first parameter, and `app.py` — the
+adapter, which owns the index — supplies it. Withdrawing the core's
+access to globals is the point of the exercise.
+
+### Remaining extraction surface (measured)
+
+`tools/` reports this via the dependency analysis below. The remaining
+coupled code and what each part reads:
+
+| Function | Lines | Reads |
+| --- | --- | --- |
+| `execute_search` | 1378 | the four index dicts, `INDEX_DATA_LOCK`, and `jsonify` |
+| `rebuild_database` | 153 | the four index dicts, `DATA_FOLDER`, `INDEX_DATA_LOCK` |
+| `upload_file` | 157 | the four index dicts, `DATA_FOLDER` |
+| `bulk_delete_documents` | 146 | the four index dicts, `DATA_FOLDER` |
+| `sync_sqlite_from_memory` | 106 | the four index dicts |
+| `load_database` | 97 | the four snapshot file paths |
+| `incrementally_index_document` | 178 | `INDEX_DATA_LOCK` plus memory/index helpers |
+| `incrementally_remove_document` | 53 | `INDEX_DATA_LOCK`, SQLite helpers |
+| `open_document` | 85 | the four index dicts, `DATA_FOLDER` |
+| persistence helpers | ~200 | file paths, `sqlite3`, `INDEX_STATUS` |
+
+The four globals to replace with an explicit index-state object are:
+
+```text
+REAL_INVERTED_INDEX   term -> {document: frequency}
+DOCUMENT_METADATA     document -> {title, path, total_words, page_count}
+FILENAME_INDEX        document -> ordered filename tokens
+PAGE_TEXT_INDEX       document -> [{page, text}]
+```
+
+Order of work, each step gated by shadow parity plus the golden vectors:
+
+1. Introduce `search_engine/index_state.py` holding those four
+   structures behind an object, and prove it equals the globals.
+2. Move the memory mutation helpers
+   (`_add_document_to_memory`, `_remove_document_from_memory`,
+   `rebuild_database`, `sync_sqlite_from_memory`) onto that object.
+3. Move persistence (`load_database`, `save_database`,
+   `save_database_snapshot`, `atomic_write_json`, the SQLite helpers).
+4. Move `execute_search` last, as `SearchEngine.search(query, page,
+   limit)` returning a plain dict. It currently calls `jsonify`
+   directly; that call must move to the adapter, which is the single
+   change that makes the core transport-independent.
+5. Reduce the route handlers in `app.py` to argument parsing, a call,
+   and `jsonify`.
+
+Step 4 is the one the Android `LocalBackend` depends on, because it is
+what turns the ranking pipeline into a callable function of an explicit
+snapshot rather than a web request.
+
+Do not attempt steps 1-5 in one commit. Each should leave `./run_tests.sh`
+green and `tools/shadow_parity.py` at zero differences.
+
 ## The parity contract
 
 `tests/golden/search_engine_vectors.json` is the single source of truth
