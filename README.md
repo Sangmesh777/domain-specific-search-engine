@@ -28,7 +28,7 @@ this work was done. See [Status](#status) for exactly what is real.
 | Area | State | Evidence |
 | --- | --- | --- |
 | Flask search API | **Working** | 275 tests pass with the server running |
-| `search_engine/` extraction | **Done** | 5 layers; app.py 4085 -> 1571 lines; engine and storage are Flask-free and parity-proven |
+| `search_engine/` extraction | **Done** | 5 layers; app.py 4085 -> 1571 lines; engine and storage are Flask-free and parity-proven. Route handlers other than search are still long (see DEVELOPMENT.md) |
 | Ranking engine | **Working** | 79/79 golden vectors, exact binary64 |
 | React web UI | **Working** | builds cleanly; live search verified through the proxy |
 | Test suite | **Working** | 275 pass with a server; 266 pass + 9 skip without one |
