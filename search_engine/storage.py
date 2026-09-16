@@ -218,6 +218,131 @@ def sync_sqlite_from_memory(
             connection.close()
 
 
+def delete_document_rows(connection, *, filename):
+    """
+    Remove every persisted row belonging to one document.
+
+    The four statements run in the same order as the inline
+    implementation this replaces - postings, filename tokens, pages,
+    then the document row - because the caller may be sharing a
+    transaction across several documents, and that order is what a
+    `rollback()` mid-batch is observed against.
+    """
+
+    connection.execute(
+        "DELETE FROM term_postings WHERE filename = ?",
+        (filename,),
+    )
+
+    connection.execute(
+        "DELETE FROM filename_terms WHERE filename = ?",
+        (filename,),
+    )
+
+    connection.execute(
+        "DELETE FROM pages WHERE filename = ?",
+        (filename,),
+    )
+
+    connection.execute(
+        "DELETE FROM documents WHERE filename = ?",
+        (filename,),
+    )
+
+
+def replace_document_rows(
+    connection,
+    *,
+    filename,
+    metadata,
+    term_counts,
+    filename_words,
+    pages,
+):
+    """
+    Persist one document's complete row set, replacing anything already
+    stored for that name.
+
+    This is the single-document write path behind uploads. It deletes
+    first so a re-upload cannot leave the previous revision's postings,
+    tokens or pages behind, and it writes the tables in the same order
+    as the inline implementation it replaces.
+
+    `filename_words` is stored with an explicit position and without
+    deduplication. The sequence is what `normalized_filename` is rebuilt
+    from after a restart, so both order and repeats are load-bearing.
+    """
+
+    delete_document_rows(
+        connection,
+        filename=filename,
+    )
+
+    connection.execute(
+        """
+        INSERT INTO documents
+        (filename, title, path, total_words, page_count)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            filename,
+            metadata["title"],
+            metadata["path"],
+            metadata["total_words"],
+            metadata["page_count"],
+        ),
+    )
+
+    connection.executemany(
+        """
+        INSERT INTO term_postings
+        (term, filename, term_count)
+        VALUES (?, ?, ?)
+        """,
+        [
+            (
+                term,
+                filename,
+                count,
+            )
+            for term, count in term_counts.items()
+        ],
+    )
+
+    connection.executemany(
+        """
+        INSERT INTO filename_terms
+        (filename, position, term)
+        VALUES (?, ?, ?)
+        """,
+        [
+            (
+                filename,
+                position,
+                term,
+            )
+            for position, term
+            in enumerate(filename_words)
+        ],
+    )
+
+    connection.executemany(
+        """
+        INSERT INTO pages
+        (filename, page_number, text)
+        VALUES (?, ?, ?)
+        """,
+        [
+            (
+                filename,
+                page_data["page"],
+                page_data["text"],
+            )
+            for page_data in pages
+        ],
+    )
+
+
 def load_database_from_sqlite(*, db_path):
     """
     Load the complete persisted SQLite snapshot into the existing

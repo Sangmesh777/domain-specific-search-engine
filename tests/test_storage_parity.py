@@ -261,15 +261,25 @@ REMOVED_FROM_APP = (
     "os.fsync",
 )
 
-# SQL that legitimately remains, and where. These are the incremental
-# write paths, which are the NEXT milestone: moving them would merge
-# storage with indexing, which this pack forbids. Naming the exact
-# functions keeps the remaining surface visible and makes any growth
-# fail this test instead of going unnoticed.
-REMAINING_SQL = {
-    "incrementally_index_document",
-    "incrementally_remove_document",
-}
+# No SQL remains in app.py. The incremental write paths used to hold
+# the last of it; they now call `replace_document_rows` and
+# `delete_document_rows`. This set is deliberately empty rather than
+# deleted: it is the assertion's expected value, so re-introducing SQL
+# anywhere in app.py fails the test instead of going unnoticed.
+REMAINING_SQL = set()
+
+# The statements the storage layer is expected to own, asserted from
+# the other side so this cannot pass by both layers dropping them.
+SQL_OWNED_BY_STORAGE = (
+    "INSERT INTO documents",
+    "INSERT INTO term_postings",
+    "INSERT INTO filename_terms",
+    "INSERT INTO pages",
+    "DELETE FROM term_postings",
+    "DELETE FROM filename_terms",
+    "DELETE FROM pages",
+    "DELETE FROM documents",
+)
 
 
 @pytest.mark.parametrize("marker", REMOVED_FROM_APP)
@@ -282,13 +292,14 @@ def test_app_no_longer_contains_the_persistence_logic(marker):
     )
 
 
-def test_remaining_sql_in_app_is_confined_to_the_incremental_paths():
+def test_app_contains_no_sql_at_all():
     """
-    Document, precisely, how much SQL is left and where.
+    Document, precisely, how much SQL is left: none.
 
-    This is deliberately a positive assertion rather than a wish. If a
-    future change adds SQL to another function, or removes these, the
-    test fails and the claim in DEVELOPMENT.md has to be updated with it.
+    Deliberately a positive assertion rather than a wish. The extraction
+    is only finished when app.py holds no statements, so any future
+    change that adds one fails here and DEVELOPMENT.md has to be
+    corrected with it.
     """
 
     source = source_of(APP_PATH)
@@ -309,9 +320,28 @@ def test_remaining_sql_in_app_is_confined_to_the_incremental_paths():
             holders.add(node.name)
 
     assert holders == REMAINING_SQL, (
-        f"the set of functions still holding SQL changed: {sorted(holders)}. "
-        f"Expected {sorted(REMAINING_SQL)}. If the extraction advanced, "
-        "update REMAINING_SQL and DEVELOPMENT.md together."
+        f"app.py still holds SQL in {sorted(holders)}. Expected "
+        f"{sorted(REMAINING_SQL)}. Move it into search_engine/storage.py "
+        "and update DEVELOPMENT.md together."
+    )
+
+
+def test_storage_layer_owns_every_write_statement():
+    """
+    The other half of the claim: the statements must exist somewhere.
+
+    Without this, deleting the SQL from both layers would leave the
+    "no SQL in app.py" test green.
+    """
+
+    source = source_of(STORAGE_PATH)
+
+    missing = [
+        marker for marker in SQL_OWNED_BY_STORAGE if marker not in source
+    ]
+
+    assert not missing, (
+        f"search_engine/storage.py no longer contains {missing}"
     )
 
 

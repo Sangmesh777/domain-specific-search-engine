@@ -216,6 +216,69 @@ def _delete(engine, names):
     return removed
 
 
+def _bulk_delete(engine, names):
+    """
+    Remove several documents through the real bulk-delete route.
+
+    This is the only path that shares one SQLite connection across
+    documents with `commit=False` and rolls the batch back on failure,
+    so it is the one whose transaction behaviour the extraction could
+    silently change. Driving the route rather than a helper keeps that
+    behaviour in scope.
+    """
+
+    flask_app = _get(engine, "app")
+
+    response = flask_app.test_client().post(
+        "/api/documents/bulk-delete",
+        json={"filenames": list(names)},
+    )
+
+    body = response.get_json(silent=True) or {}
+
+    # Only the counts and the name lists: the response also echoes index
+    # sizes and a status object, which the container comparison already
+    # covers and which would otherwise be compared twice.
+    return {
+        "status": response.status_code,
+        "deleted": body.get("deleted"),
+        "not_found": body.get("not_found"),
+        "failed": body.get("failed"),
+        "deleted_count": body.get("deleted_count"),
+        "not_found_count": body.get("not_found_count"),
+    }
+
+
+def _reindex(engine, corpus_dir, names):
+    """
+    Re-index named documents from `corpus_dir`, replacing them.
+
+    A first-time ingest never exercises the replacement branch: with no
+    previous revision there are no stale rows to leave behind, so a
+    write path that forgot to delete first would look correct. This is
+    the only action that puts a *second* revision of a document through
+    the incremental path.
+    """
+
+    incrementally_index_document = _get(
+        engine, "incrementally_index_document"
+    )
+
+    reindexed = []
+
+    for name in names:
+        try:
+            incrementally_index_document(
+                name, str(Path(corpus_dir) / name)
+            )
+            reindexed.append(name)
+
+        except Exception as error:
+            reindexed.append(f"FAILED:{name}:{type(error).__name__}")
+
+    return reindexed
+
+
 def _ingest(engine, corpus_dir):
     """
     Index the whole corpus through the real single-document path.
@@ -249,13 +312,24 @@ def _ingest(engine, corpus_dir):
     return indexed
 
 
-def run_phase(engine, data_dir, corpus_dir, phase, deletes=()):
+def run_phase(
+    engine,
+    data_dir,
+    corpus_dir,
+    phase,
+    deletes=(),
+    bulk_deletes=(),
+    reindex_dir=None,
+    reindex=(),
+):
     """Run one phase and return its dump."""
 
     report = {
         "phase": phase,
         "data_dir": str(data_dir),
         "requested_deletes": list(deletes),
+        "requested_bulk_deletes": list(bulk_deletes),
+        "requested_reindex": list(reindex),
     }
 
     if phase == "ingest":
@@ -263,6 +337,25 @@ def run_phase(engine, data_dir, corpus_dir, phase, deletes=()):
         report["indexed"] = _ingest(engine, corpus_dir)
 
         report["removed"] = _delete(engine, deletes) if deletes else []
+
+        report["bulk_removed"] = (
+            _bulk_delete(engine, bulk_deletes) if bulk_deletes else None
+        )
+
+        report["reindexed"] = (
+            _reindex(engine, reindex_dir, reindex) if reindex else []
+        )
+
+        # Capture the store BEFORE the full sync below.
+        #
+        # `sync_sqlite_from_memory` deletes every row and rewrites it
+        # from memory, so it erases exactly the kind of damage the
+        # incremental path can do - a replacement that did not delete
+        # first, or a delete that missed a table. Observing only after
+        # it runs makes those defects invisible; both were confirmed to
+        # survive a whole parity run undetected until this dump was
+        # added.
+        report["sqlite_after_incremental"] = _dump_sqlite(data_dir)
 
         # Exercise the full-sync path as well as the incremental one, so
         # the comparison covers both writers.
@@ -296,6 +389,9 @@ def main(argv=None):
     parser.add_argument("--corpus", required=True)
     parser.add_argument("--phase", choices=PHASES, required=True)
     parser.add_argument("--delete", action="append", default=[])
+    parser.add_argument("--bulk-delete", action="append", default=[])
+    parser.add_argument("--reindex-dir", default=None)
+    parser.add_argument("--reindex", action="append", default=[])
     parser.add_argument("--out", required=True)
 
     arguments = parser.parse_args(argv)
@@ -320,6 +416,9 @@ def main(argv=None):
         arguments.corpus,
         arguments.phase,
         deletes=arguments.delete,
+        bulk_deletes=arguments.bulk_delete,
+        reindex_dir=arguments.reindex_dir,
+        reindex=arguments.reindex,
     )
 
     Path(arguments.out).write_text(

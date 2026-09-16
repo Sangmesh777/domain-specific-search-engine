@@ -10,3 +10,11 @@ requests>=2.32,<3
 # Used by tools/corpus_materialize.py to build the .pdf golden corpus
 # documents so the real extraction path is exercised.
 fpdf2>=2.7,<3
+
+# Used by tools/verify_jvm_semantics.py to start a real JVM in-process,
+# so the Android port's Java-semantics claims are executed rather than
+# assumed. jdk4py ships a JRE (it runs Java; it does not compile it),
+# which is all this tool needs. Without these, tests/test_jvm_semantics
+# skips itself - the skips are visible, but the evidence is missing.
+jdk4py>=17
+pyjnius>=1.6
