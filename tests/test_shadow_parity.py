@@ -80,6 +80,9 @@ def test_all_expected_functions_were_compared(parity):
         "extract_pages",
         "build_snippet_result",
         "get_snippet_and_page",
+        # Layer 5: the ranking pipeline
+        "build_paginated_response",
+        "execute_search",
     }
 
     assert parity["functions"] == len(EXTRACTED)
