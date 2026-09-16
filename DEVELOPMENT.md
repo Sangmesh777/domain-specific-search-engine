@@ -693,29 +693,42 @@ FILENAME_INDEX        document -> ordered filename tokens
 PAGE_TEXT_INDEX       document -> [{page, text}]
 ```
 
-Order of work, each step gated by shadow parity plus the golden vectors:
+Order of work, each step gated by shadow parity plus the golden vectors.
+All five are done:
 
-1. Introduce `search_engine/index_state.py` holding those four
-   structures behind an object, and prove it equals the globals.
-2. Move the memory mutation helpers
-   (`_add_document_to_memory`, `_remove_document_from_memory`,
-   `rebuild_database`, `sync_sqlite_from_memory`) onto that object.
-3. ~~Move persistence (`load_database`, `save_database`,
-   `save_database_snapshot`, `atomic_write_json`, the SQLite helpers).~~
-   Done as layer 4.
-4. Move `execute_search` last, as `SearchEngine.search(query, page,
-   limit)` returning a plain dict. It currently calls `jsonify`
-   directly; that call must move to the adapter, which is the single
-   change that makes the core transport-independent.
-5. Reduce the route handlers in `app.py` to argument parsing, a call,
-   and `jsonify`.
+| Step | Commit | State |
+| --- | --- | --- |
+| 1. `search_engine/index_state.py` behind an object | `5bc945f` | done |
+| 2. memory mutation helpers moved onto it | `18429c2` | done |
+| 3. persistence (`load_database`, `save_database`, the SQLite helpers) | `48bf4ef` | done as layer 4 |
+| 4. `execute_search` -> `engine.search_index`, returning a plain dict | `d7ef25c` | done as layer 5 |
+| 5. route handlers reduced to parse / call / `jsonify` | - | **partly** |
 
 Step 4 is the one the Android `LocalBackend` depends on, because it is
 what turns the ranking pipeline into a callable function of an explicit
-snapshot rather than a web request.
+snapshot rather than a web request. It is finished.
 
-Do not attempt steps 1-5 in one commit. Each should leave `./run_tests.sh`
-green and `tools/shadow_parity.py` at zero differences.
+**Step 5 is not.** The search route is now a 46-line adapter, but the
+other four handlers still hold orchestration the storage and engine
+layers do not own:
+
+| Handler | Lines | Still holds |
+| --- | --- | --- |
+| `upload_file` | 158 | filesystem writes, the extraction call, the incremental index call |
+| `bulk_delete_documents` | 147 | request parsing, the batch transaction, file removal |
+| `rebuild_database` | 161 | the walk, the build, the publish order |
+| `open_document` | 86 | path resolution and file streaming |
+
+This is a known, bounded remainder rather than a silent gap. None of it
+is ranking or persistence logic - it is request handling that happens to
+be long - so it does not block the offline backend, which needs the
+engine and the storage layer and now has both.
+
+One detail is preserved deliberately in `rebuild_database`: the order is
+build, then `save_database_snapshot`, then publish, then
+`sync_sqlite_from_memory`. An earlier milestone document assumed
+sync-then-publish. The real order is the one that ships, and it is
+recorded here so the eventual extraction does not quietly "fix" it.
 
 ## The parity contract
 
