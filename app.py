@@ -695,103 +695,22 @@ def incrementally_index_document(
             )
         )
 
-    # Persist only this document and its postings.
+    # Persist only this document and its postings. The statements live
+    # in the storage layer; this function decides when they run and
+    # whether it owns the transaction.
     own_connection = connection is None
 
     if own_connection:
         connection = get_sqlite_connection()
 
     try:
-        connection.execute(
-            "DELETE FROM term_postings WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM filename_terms WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM pages WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM documents WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            """
-            INSERT INTO documents
-            (filename, title, path, total_words, page_count)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                filename,
-                metadata["title"],
-                metadata["path"],
-                metadata["total_words"],
-                metadata["page_count"],
-            ),
-        )
-
-        connection.executemany(
-            """
-            INSERT INTO term_postings
-            (term, filename, term_count)
-            VALUES (?, ?, ?)
-            """,
-            [
-                (
-                    term,
-                    filename,
-                    count,
-                )
-                for term, count in term_counts.items()
-            ],
-        )
-
-        # Every occurrence, in order, with its position.
-        #
-        # This used to be `set(filename_words)` under a (filename, term)
-        # primary key, which lost the token order (set iteration order
-        # decided it) and collapsed repeated tokens. Both changed
-        # `normalized_filename` after a restart, so quoted filename
-        # phrases stopped matching. The rows for this document were
-        # deleted above, so this is a clean rewrite.
-        connection.executemany(
-            """
-            INSERT INTO filename_terms
-            (filename, position, term)
-            VALUES (?, ?, ?)
-            """,
-            [
-                (
-                    filename,
-                    position,
-                    term,
-                )
-                for position, term
-                in enumerate(filename_words)
-            ],
-        )
-
-        connection.executemany(
-            """
-            INSERT INTO pages
-            (filename, page_number, text)
-            VALUES (?, ?, ?)
-            """,
-            [
-                (
-                    filename,
-                    page_data["page"],
-                    page_data["text"],
-                )
-                for page_data in pages
-            ],
+        storage.replace_document_rows(
+            connection,
+            filename=filename,
+            metadata=metadata,
+            term_counts=term_counts,
+            filename_words=filename_words,
+            pages=pages,
         )
 
         if commit:
@@ -835,24 +754,9 @@ def incrementally_remove_document(
         connection = get_sqlite_connection()
 
     try:
-        connection.execute(
-            "DELETE FROM term_postings WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM filename_terms WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM pages WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM documents WHERE filename = ?",
-            (filename,),
+        storage.delete_document_rows(
+            connection,
+            filename=filename,
         )
 
         if commit:

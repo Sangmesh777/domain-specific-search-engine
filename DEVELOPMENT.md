@@ -41,7 +41,8 @@ directory. They need nothing running:
 
 ```text
 tests/test_tokenizer_contract.py        72  Unicode, sanitizer, query parsing
-tests/test_storage_parity.py            28  The storage layer's separation
+tests/test_storage_parity.py            29  The storage layer's separation
+tests/test_incremental_write_path.py    17  The extracted write path
 tests/test_index_state.py               25  Ownership and atomic publication
 tests/test_filename_order_persistence.py 23  Filename order across a restart
 tests/test_memory_mutation_atomicity.py 20  Copy-on-write, torn reads
@@ -59,8 +60,8 @@ tests/test_golden_vectors.py             2  Full 79-vector replay
 when nothing is listening:
 
 ```text
-with a server     : 230 passed
-without a server  : 221 passed, 9 skipped
+with a server     : 248 passed
+without a server  : 239 passed, 9 skipped
 ```
 
 ## Architecture
@@ -513,6 +514,93 @@ patch that matched the module docstring instead of the SQL, and one that
 was a no-op on the tested path). Both were corrected before the table
 above was recorded.
 
+#### The incremental write path
+
+The last SQL in `app.py` was in the two incremental write functions.
+Both are now orchestration, and the statements live in
+`search_engine/storage.py`:
+
+```python
+delete_document_rows(connection, *, filename)
+replace_document_rows(connection, *, filename, metadata,
+                      term_counts, filename_words, pages)
+```
+
+`replace_document_rows` is a delete followed by four inserts, which is
+what the inline version did. The order matters and is preserved: a
+re-upload deletes the previous revision's rows first, so a document can
+never keep a stale posting from the revision it replaced.
+
+The functions take a connection and do not commit. Whether to commit is
+the caller's decision, because `bulk_delete_documents` shares one
+connection across a whole batch and rolls it back as a unit. Moving the
+statements must not quietly turn that batch into per-document writes, so
+two tests assert the boundary directly: with `commit=False` a second
+connection cannot see the delete, and a rollback restores every document
+in the batch rather than only the last one.
+
+Two accidental traps were found and are now guarded:
+
+* **The delete list must stay complete.** Dropping the `pages` delete
+  leaves orphan rows that a restart would resurrect. Four separate
+  tests, one per table, rather than a single count.
+* **Deleting an unknown document must stay silent.** The original issued
+  four unconditional `DELETE`s with no existence check and no raise;
+  `bulk_delete_documents` relies on that while iterating a user-supplied
+  list.
+
+#### The gate could not see this extraction at all
+
+`tools/storage_equivalence.py` was extended with a re-upload fixture and
+a bulk-delete fixture, and both new paths were immediately tested against
+deliberate breakage. Three of the breaks **passed**.
+
+| Break | Why the gate missed it |
+| --- | --- |
+| the replacement skips its delete | the probe ran `sync_sqlite_from_memory()` before dumping, and the full sync rewrites every row from memory, erasing the stale rows |
+| the delete skips a table | same reason |
+| the writer sorts the filename tokens | the pack-4 exemption compares `filename_terms` as a sorted multiset of `(filename, term)`, so it ignores both position and order |
+
+The first two are the same defect as the pack-4 writer problem in a new
+place: **an observation point downstream of a repair or a rewrite cannot
+detect damage that the rewrite undoes.** The probe now dumps the store
+twice - `sqlite_after_incremental`, captured before the full sync, and
+the post-sync store - and the comparator checks both.
+
+The third is a different failure: comparing two engines to each other can
+only find differences *between* them. A defect both sides share is
+invisible, and so is a harness that never did what it was asked. So the
+gate now also checks its own actions against expectations derived from
+the inputs rather than from the other engine:
+
+* every requested delete is gone from the final index;
+* every bulk-deleted name is gone, and every requested name is either
+  deleted or reported `not_found`;
+* a re-indexed document's `total_words` matches the revision text's token
+  count, so a re-index that silently did nothing is caught;
+* every stored `filename_terms` sequence equals
+  `tokenize_filename(stem)` and its positions run from zero, which is
+  checked against the tokenizer rather than against the monolith -
+  the monolith's order is the defect, so agreeing with it proves nothing.
+
+`tools/storage_parity_controls.py` runs six deliberate breaks and
+requires each to make the gate fail. It is not part of `run_tests.sh`,
+because it takes a few minutes; run it after touching the storage layer
+or the probe:
+
+```bash
+python3 -m tools.storage_parity_controls
+```
+
+It refuses to trust a patch that matched but changed nothing, and a
+control that fails to apply is reported as *not applied* rather than as
+*detected*. That distinction matters: while building this, a control
+whose anchor no longer matched produced a clean "0 differences" and would
+have been recorded as a passing control if the runner had not checked.
+
+Current result: **9 fixtures, 250,388 values compared, 0 differences**,
+and **6/6 controls detected**.
+
 ### Remaining extraction surface (measured)
 
 `tools/` reports this via the dependency analysis below. After layer 4,
@@ -524,16 +612,25 @@ write path, confined to exactly two functions and asserted by
 | Function | Lines | Reads |
 | --- | --- | --- |
 | `execute_search` | 1378 | the four index dicts, `INDEX_DATA_LOCK`, and `jsonify` |
-| `incrementally_index_document` | 178 | `INDEX_DATA_LOCK`, `INSERT INTO` / `DELETE FROM` |
 | `upload_file` | 157 | the four index dicts, `DATA_FOLDER` |
 | `rebuild_database` | 153 | the four index dicts, `DATA_FOLDER`, `INDEX_DATA_LOCK` |
 | `bulk_delete_documents` | 146 | the four index dicts, `DATA_FOLDER` |
 | `open_document` | 85 | the four index dicts, `DATA_FOLDER` |
-| `incrementally_remove_document` | 53 | `INDEX_DATA_LOCK`, `DELETE FROM` |
+| `incrementally_remove_document` | 57 | `INDEX_DATA_LOCK`, `storage.delete_document_rows` |
+| `incrementally_index_document` | 192 | `INDEX_DATA_LOCK`, `storage.replace_document_rows` |
 | persistence adapters | ~160 | thin wrappers over `search_engine/storage.py` |
 
 `import sqlite3` and `import json` were removed from `app.py`; both are
 now unused, and a test fails if either comes back.
+
+As of the incremental write-path extraction, **`app.py` contains no SQL
+at all** - not a `SELECT`, not an `INSERT`, not a `PRAGMA`. The four
+remaining write functions are orchestration: they take the lock, decide
+whether they own the transaction, and call into `search_engine/storage.py`.
+`test_app_contains_no_sql_at_all` asserts the empty set, and
+`test_storage_layer_owns_every_write_statement` asserts from the other
+side that the statements still exist somewhere, so the pair cannot pass
+by both layers losing them.
 
 The four globals to replace with an explicit index-state object are:
 

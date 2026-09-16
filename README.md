@@ -27,14 +27,14 @@ this work was done. See [Status](#status) for exactly what is real.
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| Flask search API | **Working** | 230 tests pass with the server running |
+| Flask search API | **Working** | 248 tests pass with the server running |
 | `search_engine/` extraction | **In progress** | 4 of 6 layers; app.py 4085 -> 3025 lines; storage is Flask-free and parity-proven |
 | Ranking engine | **Working** | 79/79 golden vectors, exact binary64 |
 | React web UI | **Working** | builds cleanly; live search verified through the proxy |
-| Test suite | **Working** | 230 pass with a server; 221 pass + 9 skip without one |
+| Test suite | **Working** | 248 pass with a server; 239 pass + 9 skip without one |
 | Shadow parity gate | **Working** | 21,365 comparisons, 0 differences |
 | Memory mutation coherence | **Closed** | copy-on-write publish; 20 tests, all 5 negative controls confirmed |
-| Persistence extraction | **Done** | 230,538 values compared vs monolith, 0 differences |
+| Persistence extraction | **Done** | app.py holds no SQL; 250,388 values compared vs monolith, 0 differences, 6/6 controls detected |
 | Filename order across restart | **Fixed** | explicit `position` column; 8/8 hash seeds keep the order; corrupt databases self-repair at startup |
 | JVM semantics | **Verified** | real JVM: 0 genuine divergences, rounding exact |
 | Golden vector gate | **Working** | catches drift; proven by negative control |
@@ -190,6 +190,7 @@ tools/
   mutation_equivalence.py    Copy-on-write planners vs the in-place helpers
   storage_probe.py           Dumps one engine session for comparison
   storage_equivalence.py     Reconstruction parity vs the monolith
+  storage_parity_controls.py Proves the parity gate can fail
 tests/
   test_phase12_live.py       Live HTTP regression suite
   test_tokenizer_contract.py Unicode, sanitizer and query contracts
@@ -201,6 +202,7 @@ tests/
   test_memory_mutation_atomicity.py  Copy-on-write publication and its AST guards
   test_storage_parity.py     Reconstruction parity and transport independence
   test_filename_order_persistence.py  Filename token order across a restart
+  test_incremental_write_path.py  The extracted single-document write path
   test_shadow_parity.py      Guards the shadow-parity function set
   test_jvm_semantics.py      JVM semantics behind the Kotlin port
   golden/                    The golden vectors

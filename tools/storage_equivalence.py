@@ -184,6 +184,146 @@ def build_fixture_corpus(fixture, destination):
         )
 
 
+def build_revision_corpus(fixture, destination):
+    """
+    Materialise the second revision of the documents named in
+    `fixture["revisions"]`.
+
+    The text has to differ from the first revision. If it were the same,
+    a replacement that forgot to delete first would rewrite identical
+    rows and look correct.
+    """
+
+    revisions = fixture.get("revisions")
+
+    if not revisions:
+        return None
+
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+
+    for name, text in sorted(revisions.items()):
+        (destination / name).write_text(text, encoding="utf-8")
+
+    return destination
+
+
+def check_effectiveness(report, fixture, revisions, label, differences):
+    """
+    Verify the actions landed, against expectations, not against the
+    other engine.
+
+    Everything here is derived from the fixture's inputs - the document
+    names, the tokenizer, and the revision text - so it holds even when
+    both engines are wrong in the same way.
+    """
+
+    from search_engine.text import tokenize, tokenize_filename
+
+    containers = report["containers"]
+    stored_documents = set(containers["document_metadata"])
+
+    # 1. A requested single delete must actually be gone.
+    for name in report.get("requested_deletes", ()):
+        if name in stored_documents:
+            differences.append(
+                f"{label}/effectiveness: {name!r} was asked to be "
+                "deleted but is still indexed"
+            )
+
+    # 2. A requested bulk delete must actually be gone.
+    bulk = report.get("bulk_removed")
+
+    if bulk:
+        for name in bulk.get("deleted") or ():
+            if name in stored_documents:
+                differences.append(
+                    f"{label}/effectiveness: {name!r} was reported as "
+                    "bulk-deleted but is still indexed"
+                )
+
+        for name in report.get("requested_bulk_deletes", ()):
+            if (
+                name not in (bulk.get("not_found") or ())
+                and name not in (bulk.get("deleted") or ())
+            ):
+                differences.append(
+                    f"{label}/effectiveness: {name!r} was requested for "
+                    "bulk deletion and neither deleted nor reported "
+                    "not_found"
+                )
+
+    # 3. A re-index must actually have replaced the document's content.
+    #
+    # total_words is the cheapest independent witness: it comes from the
+    # revision text, so a re-index that never ran leaves the previous
+    # revision's count in place.
+    for name in report.get("requested_reindex", ()):
+
+        revision = (revisions or {}).get(name)
+
+        if revision is None:
+            continue
+
+        rows = report["sqlite"]["tables"]["documents"]["rows"]
+
+        stored = [row for row in rows if row[0] == name]
+
+        if not stored:
+            differences.append(
+                f"{label}/effectiveness: {name!r} was re-indexed but has "
+                "no documents row"
+            )
+            continue
+
+        expected_words = len(tokenize(revision))
+
+        if stored[0][3] != expected_words:
+            differences.append(
+                f"{label}/effectiveness: {name!r} still holds "
+                f"total_words={stored[0][3]} after being re-indexed from "
+                f"a revision with {expected_words} words"
+            )
+
+    # 4. The stored filename token order must be the natural order.
+    #
+    # This is checked against the tokenizer, not against the monolith:
+    # the monolith's order is the defect, so agreement with it proves
+    # nothing here.
+    for table_source in (
+        report["sqlite"],
+        report.get("sqlite_after_incremental"),
+    ):
+        if not table_source or not table_source.get("exists"):
+            continue
+
+        rows = table_source["tables"]["filename_terms"]["rows"]
+
+        by_document = {}
+
+        for row in rows:
+            by_document.setdefault(row[0], []).append(row[1:])
+
+        for name, entries in sorted(by_document.items()):
+
+            positions = [entry[0] for entry in entries]
+            terms = [entry[1] for entry in entries]
+
+            expected = tokenize_filename(__import__("os").path.splitext(name)[0])
+
+            if terms != expected:
+                differences.append(
+                    f"{label}/effectiveness: {name!r} is stored as "
+                    f"{terms} but its natural token order is {expected}"
+                )
+
+            if positions != list(range(len(entries))):
+                differences.append(
+                    f"{label}/effectiveness: {name!r} has positions "
+                    f"{positions}, which are not contiguous from zero"
+                )
+
+
 FIXTURES = (
     {
         "name": "golden-corpus",
@@ -201,6 +341,36 @@ FIXTURES = (
         # Deleting one of the two documents holding `sharedterm` must
         # leave the term present and pointing only at the survivor.
         "deletes": ("shared_term_alpha.txt",),
+    },
+    {
+        "name": "synthetic-bulk-deleted",
+        "corpus": "synthetic",
+        # The bulk route shares one connection across documents with
+        # `commit=False` and rolls the whole batch back on failure. It
+        # is the only path with that transaction shape, so it gets its
+        # own fixture instead of riding along on the single-delete one.
+        # One requested name is absent and one is not a string, so the
+        # not_found and skipped branches are exercised too.
+        "deletes": (),
+        "bulk_deletes": (
+            "shared_term_alpha.txt",
+            "shared_term_beta.txt",
+            "absent_document.txt",
+        ),
+    },
+    {
+        "name": "synthetic-reuploaded",
+        "corpus": "synthetic",
+        # The only fixture with a SECOND revision of a document. Without
+        # one the replacement branch is never taken: a first ingest has
+        # no previous rows to leave behind, so a write path that skipped
+        # the delete entirely would still produce a correct store.
+        "deletes": (),
+        "revisions": {
+            "shared_term_alpha.txt":
+                "sharedterm revised alpha beta gamma delta epsilon zeta\n",
+            "Case Variant Notes.txt": "casevariant rewritten entirely\n",
+        },
     },
     {
         "name": "golden-subset-deleted",
@@ -240,7 +410,18 @@ def _probe_environment():
     return environment
 
 
-def run_probe(engine, base, data_dir, corpus_dir, phase, out_path, deletes=()):
+def run_probe(
+    engine,
+    base,
+    data_dir,
+    corpus_dir,
+    phase,
+    out_path,
+    deletes=(),
+    bulk_deletes=(),
+    reindex_dir=None,
+    reindex=(),
+):
     """Run tools/storage_probe.py once and return its parsed dump."""
 
     command = [
@@ -265,6 +446,15 @@ def run_probe(engine, base, data_dir, corpus_dir, phase, out_path, deletes=()):
     for name in deletes:
         command += ["--delete", name]
 
+    for name in bulk_deletes:
+        command += ["--bulk-delete", name]
+
+    if reindex_dir is not None:
+        command += ["--reindex-dir", str(reindex_dir)]
+
+    for name in reindex:
+        command += ["--reindex", name]
+
     environment = _probe_environment()
 
     completed = subprocess.run(
@@ -285,7 +475,16 @@ def run_probe(engine, base, data_dir, corpus_dir, phase, out_path, deletes=()):
     return json.loads(Path(out_path).read_text(encoding="utf-8"))
 
 
-def run_side(engine, base, corpus_dir, root, deletes=()):
+def run_side(
+    engine,
+    base,
+    corpus_dir,
+    root,
+    deletes=(),
+    bulk_deletes=(),
+    reindex_dir=None,
+    reindex=(),
+):
     """
     Run both phases for one engine and return (ingest, reconstruct).
 
@@ -307,6 +506,9 @@ def run_side(engine, base, corpus_dir, root, deletes=()):
         "ingest",
         Path(root) / "ingest.json",
         deletes=deletes,
+        bulk_deletes=bulk_deletes,
+        reindex_dir=reindex_dir,
+        reindex=reindex,
     )
 
     reconstruct = run_probe(
@@ -484,7 +686,15 @@ def compare_json_files(left, right, label, differences):
 def compare_actions(left, right, label, differences):
     """Compare what each side was asked to do, and what it reported."""
 
-    for field in ("indexed", "removed", "requested_deletes"):
+    for field in (
+        "indexed",
+        "removed",
+        "reindexed",
+        "bulk_removed",
+        "requested_deletes",
+        "requested_bulk_deletes",
+        "requested_reindex",
+    ):
         if left.get(field) != right.get(field):
             differences.append(
                 f"{label}: {field} differs "
@@ -563,6 +773,21 @@ def compare_reports(
         left_containers, right_containers, label, differences
     )
     compare_sqlite(left["sqlite"], right["sqlite"], label, differences)
+
+    # The store immediately after the incremental operations and before
+    # the full sync. `sync_sqlite_from_memory` rewrites every row from
+    # memory, so comparing only the post-sync state lets a replacement
+    # that skipped its delete, or a delete that missed a table, pass
+    # unnoticed. Both were observed surviving a whole parity run before
+    # this comparison existed.
+    if "sqlite_after_incremental" in left and "sqlite_after_incremental" in right:
+        compare_sqlite(
+            left["sqlite_after_incremental"],
+            right["sqlite_after_incremental"],
+            f"{label}/pre-sync",
+            differences,
+        )
+
     compare_json_files(
         left["json_files"], right["json_files"], label, differences
     )
@@ -642,9 +867,15 @@ def comparison_count(ingest, reconstruct):
                 json.dumps(report["containers"][container], sort_keys=True)
             )
 
-        sqlite = report["sqlite"]
+        # Both the post-sync store and the pre-sync one, since both are
+        # now compared and the count is meant to describe the run.
+        for sqlite in (
+            report["sqlite"],
+            report.get("sqlite_after_incremental"),
+        ):
+            if not sqlite or not sqlite.get("exists"):
+                continue
 
-        if sqlite.get("exists"):
             for table in SQLITE_TABLES:
                 total += len(sqlite["tables"][table]["rows"])
 
@@ -689,13 +920,21 @@ def run(base=DEFAULT_BASE, only=None):
 
             build_fixture_corpus(fixture, corpus_dir)
 
+            revision_dir = build_revision_corpus(
+                fixture, workspace / "revisions"
+            )
+
+            reindex = tuple(fixture.get("revisions") or ())
+
             new_ingest, new_reconstruct = run_side(
                 "new", None, corpus_dir, workspace / "new",
-                fixture["deletes"],
+                fixture["deletes"], fixture.get("bulk_deletes", ()),
+                revision_dir, reindex,
             )
             legacy_ingest, legacy_reconstruct = run_side(
                 "legacy", base, corpus_dir, workspace / "legacy",
-                fixture["deletes"],
+                fixture["deletes"], fixture.get("bulk_deletes", ()),
+                revision_dir, reindex,
             )
 
         label = fixture["name"]
@@ -703,6 +942,17 @@ def run(base=DEFAULT_BASE, only=None):
         # The parity claim: same inputs, same resulting state.
         compare_reports(
             legacy_ingest, new_ingest, f"{label}/ingest", differences
+        )
+
+        # And, independently of the monolith, that the actions landed.
+        # The monolith is only checked the same way when this is not the
+        # defect being measured; the extracted engine is always checked.
+        check_effectiveness(
+            new_ingest,
+            fixture,
+            fixture.get("revisions"),
+            f"{label}/new",
+            differences,
         )
         # Ingest is compared strictly: both engines hold the same
         # in-memory structures, so nothing is exempt there.
