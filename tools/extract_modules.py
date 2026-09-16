@@ -102,6 +102,16 @@ EXTRACTION_PLAN["search_engine/snippet.py"] = {
 # and bulk-delete paths keep working untouched, and app.py is left with
 # no SQL, no schema and no file handling.
 
+from tools.indexing_extraction_spec import (  # noqa: E402
+    DOCSTRING as INDEXING_DOCSTRING,
+    FUNCTIONS as INDEXING_FUNCTIONS,
+    IMPORTS as INDEXING_IMPORTS,
+    RENAMES as INDEXING_RENAMES,
+    TITLE as INDEXING_TITLE,
+    TRANSFORMS as INDEXING_TRANSFORMS,
+    WRAPPERS as INDEXING_WRAPPERS,
+)
+
 from tools.engine_extraction_spec import (  # noqa: E402
     DOCSTRING as ENGINE_DOCSTRING,
     FUNCTIONS as ENGINE_FUNCTIONS,
@@ -123,6 +133,14 @@ from tools.storage_extraction_spec import (  # noqa: E402
     TITLE as STORAGE_TITLE,
     TRANSFORMS as STORAGE_TRANSFORMS,
 )
+
+EXTRACTION_PLAN["search_engine/indexing.py"] = {
+    "title": INDEXING_TITLE,
+    "functions": INDEXING_FUNCTIONS,
+    "imports": INDEXING_IMPORTS,
+    "docstring": INDEXING_DOCSTRING,
+    "wrappers": INDEXING_WRAPPERS,
+}
 
 EXTRACTION_PLAN["search_engine/engine.py"] = {
     "title": ENGINE_TITLE,
@@ -329,12 +347,14 @@ TRANSFORMS = {
 
 # The persistence layer's transforms are declared in their own module;
 # merge them once the dict exists.
+TRANSFORMS.update(INDEXING_TRANSFORMS)
 TRANSFORMS.update(ENGINE_TRANSFORMS)
 TRANSFORMS.update(STORAGE_TRANSFORMS)
 
 # A function can also change name on the way in, when its old name would
 # be ambiguous in the new module.
-EXTRACTION_RENAMES = dict(ENGINE_RENAMES)
+EXTRACTION_RENAMES = dict(INDEXING_RENAMES)
+EXTRACTION_RENAMES.update(ENGINE_RENAMES)
 EXTRACTION_RENAMES.update(STORAGE_RENAMES)
 
 # Call sites in app.py that must supply the newly explicit state. app.py
@@ -463,7 +483,7 @@ def _module_header(relative_path, spec, existing_names):
     header += '"""\n'
 
     if imports:
-        header += "\n" + "\n".join(imports) + "\n"
+        header += "\n" + "\n".join(imports) + "\n\n"
 
     return header
 
@@ -787,6 +807,11 @@ def apply_extraction(dry_run=False):
         "    build_snippet_result,\n"
         "    get_snippet_and_page,\n"
         ")\n"
+        )
+
+    if "rebuild_database" in moved:
+        import_block += (
+        "from search_engine import indexing\n"
         )
 
     if "execute_search" in moved:

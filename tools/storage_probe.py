@@ -26,6 +26,7 @@ Usage (normally via the equivalence tool):
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -109,17 +110,97 @@ def _get(engine, name):
     return getattr(engine, name)
 
 
-def _snapshot_containers(engine):
-    """Return the four published containers, deep-copied into plain data."""
+def _snapshot_containers(engine, data_dir=None):
+    """
+    Return the four published containers, deep-copied into plain data.
+
+    `data_dir` only affects documents stored inside it. The rebuild path
+    reads `DATA_FOLDER`, which is per-engine, so a rebuilt document's
+    absolute path differs between the two sides by construction - and
+    the two sides are exactly what is compared. Paths under the data
+    directory are therefore recorded relative to it, identically on both
+    sides. Anything outside it - which is every document in the ingest
+    phase, since the corpus is shared - is left exactly as it was.
+
+    This normalises an environment-specific value; it is not an
+    exemption. A rebuilt document still has to produce the same relative
+    path, title, word count and page count on both sides.
+    """
 
     state = _get(engine, "INDEX_STATE")
 
     published = state.snapshot()
 
-    return {
+    containers = {
         name: json.loads(json.dumps(published[name]))
         for name in CONTAINERS
     }
+
+    return containers
+
+
+def _normalise_paths(report, data_dir):
+    """
+    Make data-directory paths comparable across two isolated engines.
+
+    The rebuild reads `DATA_FOLDER`, which each engine has to itself, so
+    a rebuilt document's absolute path differs between the two sides by
+    construction - and the two sides are exactly what is compared.
+
+    Every path under the data directory is therefore recorded relative
+    to it, in all three places the engine puts one: the published
+    containers, the `documents.path` column, and the JSON snapshot
+    files. Anything outside the data directory - which is every document
+    in an incremental fixture, since the corpus is shared - is left
+    alone.
+
+    This normalises an environment-specific value; it is not an
+    exemption. A rebuilt document still has to produce the same relative
+    path, title, word count and page count on both sides.
+    """
+
+    prefix = os.path.realpath(str(data_dir)) + os.sep
+
+    def relative(value):
+        if isinstance(value, str) and value.startswith(prefix):
+            return value[len(prefix):].replace(os.sep, "/")
+        return value
+
+    for metadata in report["containers"]["document_metadata"].values():
+        metadata["path"] = relative(metadata.get("path"))
+
+    for key in ("sqlite", "sqlite_after_incremental"):
+
+        dump = report.get(key)
+
+        if not dump or not dump.get("exists"):
+            continue
+
+        documents = dump["tables"].get("documents")
+
+        if not documents:
+            continue
+
+        columns = documents["columns"]
+
+        if "path" not in columns:
+            continue
+
+        index = columns.index("path")
+
+        for row in documents["rows"]:
+            row[index] = relative(row[index])
+
+    # `document_meta.json` maps a filename to {"path": ..., ...}.
+    for name, payload in (report.get("json_files") or {}).items():
+
+        if not isinstance(payload, dict):
+            continue
+
+        for metadata in payload.values():
+
+            if isinstance(metadata, dict) and "path" in metadata:
+                metadata["path"] = relative(metadata["path"])
 
 
 def _dump_sqlite(data_dir):
@@ -279,6 +360,39 @@ def _reindex(engine, corpus_dir, names):
     return reindexed
 
 
+def _rebuild(engine, data_dir, corpus_dir):
+    """
+    Run the real full rebuild over the data folder.
+
+    The rebuild reads `DATA_FOLDER`, so the corpus is copied into it
+    first. Without that the folder holds only `search.db` and the
+    rebuild produces an empty snapshot on both sides - equal, and
+    meaningless.
+
+    This is the only path that walks a folder and rebuilds every
+    container from scratch, and it is the path whose publish order the
+    indexing extraction had to preserve, so it gets its own comparison
+    rather than being assumed to follow from the incremental one.
+    """
+
+    copied = []
+
+    for path in sorted(Path(corpus_dir).iterdir()):
+
+        if not path.is_file():
+            continue
+
+        shutil.copy2(path, Path(data_dir) / path.name)
+
+        copied.append(path.name)
+
+    rebuild_database = _get(engine, "rebuild_database")
+
+    rebuild_database()
+
+    return copied
+
+
 def _ingest(engine, corpus_dir):
     """
     Index the whole corpus through the real single-document path.
@@ -321,6 +435,7 @@ def run_phase(
     bulk_deletes=(),
     reindex_dir=None,
     reindex=(),
+    rebuild=False,
 ):
     """Run one phase and return its dump."""
 
@@ -330,6 +445,7 @@ def run_phase(
         "requested_deletes": list(deletes),
         "requested_bulk_deletes": list(bulk_deletes),
         "requested_reindex": list(reindex),
+        "rebuild": bool(rebuild),
     }
 
     if phase == "ingest":
@@ -357,6 +473,14 @@ def run_phase(
         # added.
         report["sqlite_after_incremental"] = _dump_sqlite(data_dir)
 
+        if rebuild:
+
+            report["rebuilt"] = _rebuild(engine, data_dir, corpus_dir)
+
+            # The rebuild publishes and syncs on its own, so this is the
+            # store the post-sync comparison will also see.
+            report["sqlite_after_incremental"] = _dump_sqlite(data_dir)
+
         # Exercise the full-sync path as well as the incremental one, so
         # the comparison covers both writers.
         sync_sqlite_from_memory = _get(engine, "sync_sqlite_from_memory")
@@ -367,9 +491,11 @@ def run_phase(
 
         save_database()
 
-    report["containers"] = _snapshot_containers(engine)
+    report["containers"] = _snapshot_containers(engine, data_dir)
     report["sqlite"] = _dump_sqlite(data_dir)
     report["json_files"] = _dump_json_files(data_dir)
+
+    _normalise_paths(report, data_dir)
 
     status = _get(engine, "INDEX_STATUS")
 
@@ -391,6 +517,7 @@ def main(argv=None):
     parser.add_argument("--delete", action="append", default=[])
     parser.add_argument("--bulk-delete", action="append", default=[])
     parser.add_argument("--reindex-dir", default=None)
+    parser.add_argument("--rebuild", action="store_true")
     parser.add_argument("--reindex", action="append", default=[])
     parser.add_argument("--out", required=True)
 
@@ -419,6 +546,7 @@ def main(argv=None):
         bulk_deletes=arguments.bulk_delete,
         reindex_dir=arguments.reindex_dir,
         reindex=arguments.reindex,
+        rebuild=arguments.rebuild,
     )
 
     Path(arguments.out).write_text(
