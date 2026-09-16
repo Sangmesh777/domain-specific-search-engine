@@ -3,10 +3,14 @@
 > **STATUS: SPECIFICATION AND UNCOMPILED SOURCE ONLY.**
 >
 > No Android toolchain exists in the environment where this document was
-> written: there is no JDK, no Android SDK, no Gradle, and the network
-> blocks `dl.google.com`, `maven.google.com`, `services.gradle.org` and
-> `repo.maven.apache.org`. Nothing under `android/` has been compiled,
-> and no APK has been produced. See [Toolchain status](#toolchain-status).
+> written: there is no compiler, no Android SDK, no Gradle, and the
+> network blocks `dl.google.com`, `maven.google.com`,
+> `services.gradle.org`, `repo.maven.apache.org` and
+> `release-assets.githubusercontent.com`. A **runtime** JVM is
+> available through PyPI, which is enough to execute the Java-semantics
+> checks in section 5.1.1, but it ships no `javac` and no Kotlin
+> compiler, so nothing under `android/` has been compiled and no APK
+> has been produced. See [Toolchain status](#toolchain-status).
 >
 > Everything in this document that describes *Python* behaviour was
 > verified by executing the real engine. Everything that describes
