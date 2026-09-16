@@ -359,6 +359,24 @@ FIXTURES = (
         ),
     },
     {
+        "name": "mixed-rebuilt",
+        # `both`, not `golden`: the synthetic half carries a document
+        # that extracts to text but tokenizes to nothing, which is the
+        # only case that reaches the build's "skip empty document"
+        # branch. With the golden corpus alone that branch is dead code
+        # in this fixture, and a build that stopped skipping empties
+        # produced no difference at all.
+        "corpus": "both",
+        "deletes": (),
+        # The only fixture that exercises `rebuild_database`. It walks
+        # the data folder and builds every container from scratch, which
+        # no other fixture does - the incremental fixtures only ever
+        # touch one document at a time. This is also the path whose
+        # publish order (build, save, publish, sync) the indexing
+        # extraction had to preserve verbatim.
+        "rebuild": True,
+    },
+    {
         "name": "synthetic-reuploaded",
         "corpus": "synthetic",
         # The only fixture with a SECOND revision of a document. Without
@@ -421,6 +439,7 @@ def run_probe(
     bulk_deletes=(),
     reindex_dir=None,
     reindex=(),
+    rebuild=False,
 ):
     """Run tools/storage_probe.py once and return its parsed dump."""
 
@@ -451,6 +470,9 @@ def run_probe(
 
     if reindex_dir is not None:
         command += ["--reindex-dir", str(reindex_dir)]
+
+    if rebuild:
+        command += ["--rebuild"]
 
     for name in reindex:
         command += ["--reindex", name]
@@ -484,6 +506,7 @@ def run_side(
     bulk_deletes=(),
     reindex_dir=None,
     reindex=(),
+    rebuild=False,
 ):
     """
     Run both phases for one engine and return (ingest, reconstruct).
@@ -509,6 +532,7 @@ def run_side(
         bulk_deletes=bulk_deletes,
         reindex_dir=reindex_dir,
         reindex=reindex,
+        rebuild=rebuild,
     )
 
     reconstruct = run_probe(
@@ -929,12 +953,12 @@ def run(base=DEFAULT_BASE, only=None):
             new_ingest, new_reconstruct = run_side(
                 "new", None, corpus_dir, workspace / "new",
                 fixture["deletes"], fixture.get("bulk_deletes", ()),
-                revision_dir, reindex,
+                revision_dir, reindex, fixture.get("rebuild", False),
             )
             legacy_ingest, legacy_reconstruct = run_side(
                 "legacy", base, corpus_dir, workspace / "legacy",
                 fixture["deletes"], fixture.get("bulk_deletes", ()),
-                revision_dir, reindex,
+                revision_dir, reindex, fixture.get("rebuild", False),
             )
 
         label = fixture["name"]

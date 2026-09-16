@@ -39,7 +39,9 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 STORAGE = REPO_ROOT / "search_engine" / "storage.py"
 PROBE = REPO_ROOT / "tools" / "storage_probe.py"
 
-WATCHED = (STORAGE, PROBE)
+INDEXING = REPO_ROOT / "search_engine" / "indexing.py"
+
+WATCHED = (STORAGE, PROBE, INDEXING)
 
 
 def digest(path):
@@ -182,6 +184,26 @@ def delete_skips_pages():
         '''    connection.execute(
         "DELETE FROM documents WHERE filename = ?",''',
         label="delete skips pages",
+    )
+
+
+@control("the index build sorts the filename tokens")
+def build_sorts_tokens():
+    apply_patch(
+        INDEXING,
+        "            ] = filename_words",
+        "            ] = sorted(filename_words)",
+        label="build sorts tokens",
+    )
+
+
+@control("the index build stops skipping documents with no text")
+def build_keeps_empty_documents():
+    apply_patch(
+        INDEXING,
+        "            if not content_words:",
+        "            if False:",
+        label="build keeps empty documents",
     )
 
 

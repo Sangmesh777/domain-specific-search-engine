@@ -41,6 +41,7 @@ directory. They need nothing running:
 
 ```text
 tests/test_tokenizer_contract.py        72  Unicode, sanitizer, query parsing
+tests/test_indexing_layer.py             19  Document layout and index building
 tests/test_engine_layer.py              27  Transport independence of the core
 tests/test_storage_parity.py            29  The storage layer's separation
 tests/test_incremental_write_path.py    17  The extracted write path
@@ -61,8 +62,8 @@ tests/test_golden_vectors.py             2  Full 79-vector replay
 when nothing is listening:
 
 ```text
-with a server     : 275 passed
-without a server  : 266 passed, 9 skipped
+with a server     : 294 passed
+without a server  : 285 passed, 9 skipped
 ```
 
 ## Architecture
@@ -550,6 +551,36 @@ Two accidental traps were found and are now guarded:
   `bulk_delete_documents` relies on that while iterating a user-supplied
   list.
 
+#### The rebuild path had no parity coverage either
+
+Extracting the build surfaced a second hole of the same kind. The
+storage probe drove ingest, single delete, bulk delete and re-index, but
+**never `rebuild_database`** - so the one path that builds every
+container from scratch, and the one whose publish order is the subtlest
+thing in the file, had no monolith comparison at all. Three deliberate
+breaks in the build (sorting the filename tokens, indexing documents
+with no text, publishing before building) all passed a full parity run.
+
+The probe now has a `--rebuild` action and the gate has a
+`mixed-rebuilt` fixture. Three details were needed to make it honest:
+
+* the corpus is copied into the data directory first, because the
+  rebuild reads `DATA_FOLDER`. Without that it produces an empty
+  snapshot on both sides - equal, and meaningless;
+* the fixture uses the `both` corpus, not `golden`. The golden corpus
+  has no document that extracts to text but tokenizes to nothing, so
+  the build's "skip empty document" branch is dead code there and a
+  build that stopped skipping produced **zero** differences;
+* paths under the data directory are recorded relative to it, in all
+  three places one appears (the containers, the `documents.path`
+  column, and the JSON snapshot files). Each engine has its own data
+  directory, so those absolute paths differ by construction. This is a
+  normalisation of an environment-specific value, not an exemption: the
+  relative path, title, word count and page count are all still
+  compared.
+
+Two controls now aim at the build, and both are detected.
+
 #### The gate could not see this extraction at all
 
 `tools/storage_equivalence.py` was extended with a re-upload fixture and
@@ -599,8 +630,8 @@ control that fails to apply is reported as *not applied* rather than as
 whose anchor no longer matched produced a clean "0 differences" and would
 have been recorded as a passing control if the runner had not checked.
 
-Current result: **9 fixtures, 250,388 values compared, 0 differences**,
-and **6/6 controls detected**.
+Current result: **10 fixtures, 324,500 values compared, 0 differences**,
+and **8/8 controls detected**.
 
 ### Layer 5: `search_engine/engine.py` (done, last extraction)
 
@@ -657,20 +688,29 @@ INDEX_DATA_LOCK`.
 
 `tools/` reports this via the dependency analysis below. After layer 4,
 `app.py` contains **no** schema creation, no connection factory, no
-`SELECT`, and no JSON file I/O. The only SQL left is the incremental
-write path, confined to exactly two functions and asserted by
-`test_remaining_sql_in_app_is_confined_to_the_incremental_paths`:
+`SELECT`, and no JSON file I/O. There is also no SQL left anywhere in
+it, asserted by `test_app_contains_no_sql_at_all`.
 
-| Function | Lines | Reads |
+| Function | Lines | What it is now |
 | --- | --- | --- |
-| `execute_search` | 46 | a thin adapter: `request.args`, `INDEX_DATA_LOCK`, `jsonify`, `search_index` |
-| `upload_file` | 157 | the four index dicts, `DATA_FOLDER` |
-| `rebuild_database` | 153 | the four index dicts, `DATA_FOLDER`, `INDEX_DATA_LOCK` |
-| `bulk_delete_documents` | 146 | the four index dicts, `DATA_FOLDER` |
-| `open_document` | 85 | the four index dicts, `DATA_FOLDER` |
-| `incrementally_remove_document` | 57 | `INDEX_DATA_LOCK`, `storage.delete_document_rows` |
-| `incrementally_index_document` | 192 | `INDEX_DATA_LOCK`, `storage.replace_document_rows` |
+| `execute_search` | 40 | transport: `request.args`, the lock, `jsonify`, `search_index` |
+| `rebuild_database` | 59 | the publish order, over `indexing.build_index_from_folder` |
+| `resolve_document_path` | 11 | an adapter over `indexing.resolve_document_path` |
+| `incrementally_index_document` | 111 | the lock and the transaction, over `storage.replace_document_rows` |
+| `incrementally_remove_document` | 42 | the lock and the transaction, over `storage.delete_document_rows` |
 | persistence adapters | ~160 | thin wrappers over `search_engine/storage.py` |
+| `upload_file` | 158 | request parsing, per-file staging, response building |
+| `bulk_delete_documents` | 147 | request parsing, the batch transaction, file removal |
+| `open_document` | 86 | streaming a resolved path |
+| `rebuild_database_background` | 64 | thread lifecycle and status |
+
+The last four are what is left, and they are **request handling rather
+than engine logic**: their length comes from response construction,
+status bookkeeping and per-file error reporting, not from indexing or
+scoring rules. Extracting them further would create a service layer
+whose only caller is one route and which would still call back into the
+application for the lock and the incremental writer. They are recorded
+here rather than left to look finished.
 
 `import sqlite3` and `import json` were removed from `app.py`; both are
 now unused, and a test fails if either comes back.

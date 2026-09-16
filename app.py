@@ -789,6 +789,24 @@ def queue_index_refresh():
 
 
 
+
+# ============================================================
+# REBUILD AND PATH ADAPTERS
+# ============================================================
+#
+# The build now lives in search_engine/indexing.py and returns a
+# snapshot. This adapter keeps the ordering, which is the part that
+# belongs to the application:
+#
+#     build -> save JSON snapshot -> publish -> sync SQLite
+#
+# That order is the one that shipped before the extraction. An earlier
+# design note assumed sync-then-publish. The difference matters: a crash
+# between the two leaves either a saved snapshot with an old live index,
+# or a live index with an unsaved snapshot, and only one of those is
+# recoverable.
+
+
 def rebuild_database():
     """
     Build a complete new index without mutating the active snapshot.
@@ -798,111 +816,14 @@ def rebuild_database():
     index dictionaries are swapped together.
     """
 
-    print()
-    print("==============================================")
-    print("REBUILDING SEARCH DATABASE")
-    print("==============================================")
-
-    new_inverted_index = {}
-    new_document_metadata = {}
-    new_filename_index = {}
-    new_page_text_index = {}
-
-    supported_extensions = (
-        ".pdf",
-        ".docx",
-        ".txt",
+    new_snapshot = indexing.build_index_from_folder(
+        DATA_FOLDER
     )
 
-    for filename in os.listdir(DATA_FOLDER):
-
-        if not filename.lower().endswith(
-            supported_extensions
-        ):
-            continue
-
-        file_path = os.path.join(
-            DATA_FOLDER,
-            filename,
-        )
-
-        print(
-            f"[REBUILD] Indexing: {filename}"
-        )
-
-        try:
-            text = extract_text(
-                file_path,
-                filename,
-            )
-
-            content_words = tokenize(text)
-
-            filename_without_extension = (
-                os.path.splitext(filename)[0]
-            )
-
-            filename_words = tokenize_filename(
-                filename_without_extension
-            )
-
-            pages = extract_pages(
-                file_path,
-                filename,
-            )
-
-            if not content_words:
-                print(
-                    "[REBUILD] Skipped empty document: "
-                    f"{filename}"
-                )
-                continue
-
-            new_document_metadata[filename] = {
-                "title": filename,
-                "path": os.path.abspath(file_path),
-                "total_words": len(content_words),
-                "page_count": len(pages),
-            }
-
-            new_filename_index[
-                filename
-            ] = filename_words
-
-            new_page_text_index[
-                filename
-            ] = pages
-
-            for word in content_words:
-
-                if word not in new_inverted_index:
-                    new_inverted_index[word] = {}
-
-                if (
-                    filename
-                    not in new_inverted_index[word]
-                ):
-                    new_inverted_index[word][filename] = 0
-
-                new_inverted_index[word][filename] += 1
-
-        except Exception as error:
-
-            print(
-                f"[REBUILD ERROR] Could not index "
-                f"{filename}: {error}"
-            )
-
-            continue
-
-    print()
-    print(
-        "[REBUILD] New snapshot complete: "
-        f"{len(new_document_metadata)} documents, "
-        f"{len(new_inverted_index)} content terms, "
-        f"{len(new_filename_index)} filenames indexed, "
-        f"{len(new_page_text_index)} page-text entries"
-    )
+    new_inverted_index = new_snapshot["inverted_index"]
+    new_document_metadata = new_snapshot["document_metadata"]
+    new_filename_index = new_snapshot["filename_index"]
+    new_page_text_index = new_snapshot["page_text_index"]
 
     # Write the full new snapshot first.
     save_database_snapshot(
@@ -911,11 +832,6 @@ def rebuild_database():
         new_filename_index,
         new_page_text_index,
     )
-
-    global REAL_INVERTED_INDEX
-    global DOCUMENT_METADATA
-    global FILENAME_INDEX
-    global PAGE_TEXT_INDEX
 
     # One pointer swap: searches see old or new, never a partial build.
     # The globals are re-pointed inside the same critical section,
@@ -950,6 +866,23 @@ def rebuild_database():
 
     print("==============================================")
     print()
+
+
+def resolve_document_path(filename):
+    """
+    Thin adapter: the data folder is the application's.
+
+    The guard itself lives beside the code that owns document layout.
+    """
+
+    return indexing.resolve_document_path(
+        DATA_FOLDER,
+        filename,
+    )
+
+
+from search_engine import indexing
+
 load_database()
 initialize_sqlite_store()
 
@@ -1218,34 +1151,6 @@ from search_engine.engine import search_index
 
 
 
-def resolve_document_path(filename):
-    """
-    Resolve an indexed document to a real path inside DATA_FOLDER.
-
-    Prevents GET/DELETE document paths from escaping DATA_FOLDER.
-    """
-
-    if not filename:
-        return None
-
-    data_root = os.path.realpath(DATA_FOLDER)
-
-    requested_path = os.path.realpath(
-        os.path.join(
-            DATA_FOLDER,
-            os.path.basename(filename)
-        )
-    )
-
-    try:
-        if os.path.commonpath(
-            [data_root, requested_path]
-        ) != data_root:
-            return None
-    except ValueError:
-        return None
-
-    return requested_path
 
 
 # ============================================================

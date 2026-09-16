@@ -27,14 +27,14 @@ this work was done. See [Status](#status) for exactly what is real.
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| Flask search API | **Working** | 275 tests pass with the server running |
+| Flask search API | **Working** | 294 tests pass with the server running |
 | `search_engine/` extraction | **Done** | 5 layers; app.py 4085 -> 1571 lines; engine and storage are Flask-free and parity-proven. Route handlers other than search are still long (see DEVELOPMENT.md) |
 | Ranking engine | **Working** | 79/79 golden vectors, exact binary64 |
 | React web UI | **Working** | builds cleanly; live search verified through the proxy |
-| Test suite | **Working** | 275 pass with a server; 266 pass + 9 skip without one |
+| Test suite | **Working** | 294 pass with a server; 285 pass + 9 skip without one |
 | Shadow parity gate | **Working** | 12 functions, 21,454 comparisons, 0 differences |
 | Memory mutation coherence | **Closed** | copy-on-write publish; 20 tests, all 5 negative controls confirmed |
-| Persistence extraction | **Done** | app.py holds no SQL; 250,388 values compared vs monolith, 0 differences, 6/6 controls detected |
+| Persistence extraction | **Done** | app.py holds no SQL; 324,500 values compared vs monolith, 0 differences, 8/8 controls detected |
 | Filename order across restart | **Fixed** | explicit `position` column; 8/8 hash seeds keep the order; corrupt databases self-repair at startup |
 | JVM semantics | **Verified** | real JVM: 0 genuine divergences, rounding exact |
 | Golden vector gate | **Working** | catches drift; proven by negative control |
@@ -204,6 +204,7 @@ tests/
   test_filename_order_persistence.py  Filename token order across a restart
   test_incremental_write_path.py  The extracted single-document write path
   test_engine_layer.py       Transport independence of the ranking core
+  test_indexing_layer.py     Document layout and index building
   test_shadow_parity.py      Guards the shadow-parity function set
   test_jvm_semantics.py      JVM semantics behind the Kotlin port
   golden/                    The golden vectors
