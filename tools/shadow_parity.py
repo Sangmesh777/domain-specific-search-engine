@@ -50,6 +50,16 @@ EXTRACTED = {
     "extract_pages": "search_engine.extract",
     "build_snippet_result": "search_engine.snippet",
     "get_snippet_and_page": "search_engine.snippet",
+    # Layer 5: the ranking pipeline. `build_paginated_response` keeps its
+    # name; `execute_search` became `search_index` on the way in, because
+    # in the new module it is no longer a request handler.
+    "build_paginated_response": "search_engine.engine",
+    "execute_search": "search_engine.engine",
+}
+
+# Extracted-side names that differ from the originals.
+EXTRACTED_RENAMES = {
+    "execute_search": "search_index",
 }
 
 # Functions whose extracted signature differs from the original.
@@ -73,6 +83,11 @@ STRUCTURED_FUNCTIONS = {
     "extract_pages",
     "build_snippet_result",
     "get_snippet_and_page",
+    # These two take an index snapshot, not a string, and the original
+    # `execute_search` reads `request` and calls `jsonify`. They are
+    # compared in `run_engine_structured`.
+    "build_paginated_response",
+    "execute_search",
 }
 
 RANDOM_CASES = 4000
@@ -102,6 +117,197 @@ def load_original_namespace(base_revision):
     namespace = load_original_functions(base_revision)
 
     return namespace, None
+
+
+# The four index containers, in the order the engine takes them.
+INDEX_CONTAINERS = (
+    "REAL_INVERTED_INDEX",
+    "DOCUMENT_METADATA",
+    "FILENAME_INDEX",
+    "PAGE_TEXT_INDEX",
+)
+
+
+class _RequestShim:
+    """
+    Minimal stand-in for Flask's `request` in the original body.
+
+    `args.get` is the only thing the ranking code uses. It is fed the
+    same strings the adapter would pass through, so the original's own
+    `int()` parsing and its `except (TypeError, ValueError)` fallback
+    run exactly as they do in production.
+    """
+
+    def __init__(self):
+        self.args = {}
+        self._getter = staticmethod(lambda key, default=None: default)
+
+    def install(self, values):
+        self.args = dict(values)
+
+    def get(self, key, default=None):
+        return self.args.get(key, default)
+
+
+class _LockShim:
+    """A no-op context manager standing in for `INDEX_DATA_LOCK`."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exception):
+        return False
+
+
+REQUEST_SHIM = _RequestShim()
+
+
+def jsonify_shim(payload):
+    """
+    Returns its argument unchanged.
+
+    The extracted body returns the payload directly; the original
+    serialises it. Returning it here makes the two comparable without
+    needing a Flask app context.
+    """
+
+    return payload
+
+
+LOCK_SHIM = _LockShim()
+
+
+def _install_containers(namespace, inverted_index, document_metadata,
+                        filename_index, page_text_index):
+    """Point the original's four globals at one snapshot."""
+
+    for container, value in zip(
+        INDEX_CONTAINERS,
+        (inverted_index, document_metadata, filename_index, page_text_index),
+    ):
+        namespace[container] = value
+
+
+# The exec'd namespace holding the original bodies. The ranking
+# comparison installs a fixture snapshot into its four index globals,
+# because that is how the original obtained them.
+_ORIGINAL_NAMESPACE = {}
+
+
+def build_engine_snapshot():
+    """
+    One index snapshot that reaches the awkward branches.
+
+    Built by hand rather than by running the engine, so the comparison
+    does not depend on the code it is checking.
+    """
+
+    inverted_index = {
+        "alpha": {"note.txt": 2, "multi.txt": 1},
+        "beta": {"note.txt": 1, "multi.txt": 3},
+        "gamma": {"multi.txt": 2},
+        "shared": {"note.txt": 1, "multi.txt": 1},
+        "9901": {"numeric.txt": 4},
+        "unicode": {"unicode.txt": 1},
+    }
+
+    document_metadata = {
+        "note.txt": {
+            "title": "note.txt",
+            "path": "/corpus/note.txt",
+            "total_words": 4,
+            "page_count": 1,
+        },
+        "multi.txt": {
+            "title": "multi.txt",
+            "path": "/corpus/multi.txt",
+            "total_words": 6,
+            "page_count": 2,
+        },
+        "numeric.txt": {
+            "title": "numeric.txt",
+            "path": "/corpus/numeric.txt",
+            "total_words": 4,
+            "page_count": 1,
+        },
+        "unicode.txt": {
+            "title": "unicode.txt",
+            "path": "/corpus/unicode.txt",
+            "total_words": 1,
+            "page_count": 1,
+        },
+        # Deliberately not in alphabetical token order, and with a
+        # repeated token, so `normalized_filename` is order-sensitive.
+        "zulu alpha mike.txt": {
+            "title": "zulu alpha mike.txt",
+            "path": "/corpus/zulu alpha mike.txt",
+            "total_words": 1,
+            "page_count": 1,
+        },
+    }
+
+    filename_index = {
+        "note.txt": ["note"],
+        "multi.txt": ["multi"],
+        "numeric.txt": ["numeric"],
+        "unicode.txt": ["unicode"],
+        "zulu alpha mike.txt": ["zulu", "alpha", "mike"],
+    }
+
+    page_text_index = {
+        "note.txt": [{"page": 1, "text": "alpha beta shared"}],
+        "multi.txt": [
+            {"page": 1, "text": "alpha gamma"},
+            {"page": 2, "text": "beta beta beta"},
+        ],
+        "numeric.txt": [{"page": 1, "text": "9901 appears here"}],
+        "unicode.txt": [{"page": 1, "text": "unicode"}],
+        "zulu alpha mike.txt": [{"page": 1, "text": "nothing to see"}],
+    }
+
+    return (
+        inverted_index,
+        document_metadata,
+        filename_index,
+        page_text_index,
+    )
+
+
+# Queries chosen to reach each scoring branch, plus the pathological
+# shapes: empty, whitespace, a bare quote, a reversed phrase, an
+# out-of-range page, a non-numeric limit, and a filetype filter that
+# matches nothing.
+ENGINE_CASES = (
+    ("alpha", "1", "10"),
+    ("alpha beta", "1", "10"),
+    ("alpha", "2", "1"),
+    ("alpha", "99", "10"),
+    ("alpha", "0", "10"),
+    ("alpha", "1", "0"),
+    ("alpha", "1", "999"),
+    ("alpha", "x", "y"),
+    ("", "1", "10"),
+    ("   ", "1", "10"),
+    ('"', "1", "10"),
+    ('"alpha beta"', "1", "10"),
+    ('"beta alpha"', "1", "10"),
+    ('"zulu alpha mike"', "1", "10"),
+    ('"alpha mike zulu"', "1", "10"),
+    ("9901", "1", "10"),
+    ("990", "1", "10"),
+    ("al", "1", "10"),
+    ("ALPHA", "1", "10"),
+    ("shared", "1", "10"),
+    ("unicode", "1", "10"),
+    ("txt", "1", "10"),
+    ("pdf", "1", "10"),
+    ("docx", "1", "10"),
+    ("note.txt", "1", "10"),
+    ("note", "1", "10"),
+    ('"note"', "1", "10"),
+    ("missingterm", "1", "10"),
+    ("alpha shared unicode", "1", "2"),
+)
 
 
 def load_original_functions(base_revision):
@@ -155,16 +361,38 @@ def load_original_functions(base_revision):
     # The originals reference os, secure_filename and the page text
     # index global.
     header = (
+        "import math\n"
         "import os\n"
         "import re\n"
         "import PyPDF2\n"
         "import docx\n"
+        "from urllib.parse import quote\n"
         "from werkzeug.utils import secure_filename\n"
     )
 
     exec(header + "\n\n\n".join(segments), namespace)
 
     namespace["PAGE_TEXT_INDEX"] = PAGE_TEXT_INDEX_FIXTURE
+
+    # The original `execute_search` is a Flask handler: it reads
+    # `request.args` and returns `jsonify(...)`. Neither is available
+    # here, and neither is what is under test. The shims below make the
+    # original body behave like the extracted one - a function of its
+    # arguments returning a plain payload - so the two can be compared
+    # value for value. `JSONIFY_SHIM.returned` records the argument, so a
+    # comparison is unaffected by the Response type.
+    global _ORIGINAL_NAMESPACE
+    _ORIGINAL_NAMESPACE = namespace
+
+    namespace["request"] = REQUEST_SHIM
+    namespace["jsonify"] = jsonify_shim
+
+    # The four containers the original captured from globals. The
+    # comparison installs the same fixture into both sides.
+    for container in INDEX_CONTAINERS:
+        namespace[container] = None
+
+    namespace["INDEX_DATA_LOCK"] = LOCK_SHIM
 
     return {
         name: namespace[name]
@@ -181,7 +409,9 @@ def load_extracted_functions():
 
     for name, module_name in EXTRACTED.items():
         module = importlib.import_module(module_name)
-        functions[name] = getattr(module, name)
+        functions[name] = getattr(
+            module, EXTRACTED_RENAMES.get(name, name)
+        )
 
     return functions
 
@@ -444,6 +674,122 @@ def run_structured(original_module, extracted, page_text_index, limit):
                 original_module["count_phrase_occurrences"](text, phrase),
                 extracted["count_phrase_occurrences"](text, phrase),
             )
+
+    # --- the ranking pipeline ---------------------------------------
+    #
+    # The end-to-end comparison: whole payloads, over a snapshot that
+    # contains the awkward cases (a quoted phrase, a numeric token, a
+    # filename whose tokens are not in alphabetical order, a document
+    # with no matching content) and over queries that reach every
+    # scoring branch.
+    #
+    # The original reads `request` and returns `jsonify(...)`. Both are
+    # shimmed, so this compares ranking output rather than transport,
+    # which is exactly the change being made.
+    (
+        inverted_index,
+        document_metadata,
+        filename_index,
+        page_text_index,
+    ) = build_engine_snapshot()
+
+    for container, value in zip(
+        INDEX_CONTAINERS,
+        (
+            inverted_index,
+            document_metadata,
+            filename_index,
+            page_text_index,
+        ),
+    ):
+        _ORIGINAL_NAMESPACE[container] = value
+
+    for query, page, limit_text in ENGINE_CASES:
+
+        REQUEST_SHIM.install({
+            "q": query,
+            "page": page,
+            "limit": limit_text,
+        })
+
+        comparisons += 1
+
+        try:
+            expected = original_module["execute_search"]()
+            expected_error = None
+        except Exception as error:  # noqa: BLE001 - comparing behaviour
+            expected = None
+            expected_error = type(error).__name__
+
+        try:
+            actual = extracted["execute_search"](
+                query,
+                page,
+                limit_text,
+                inverted_index,
+                document_metadata,
+                filename_index,
+                page_text_index,
+            )
+            actual_error = None
+        except Exception as error:  # noqa: BLE001 - comparing behaviour
+            actual = None
+            actual_error = type(error).__name__
+
+        if expected != actual or expected_error != actual_error:
+            if len(differences) < limit:
+                differences.append({
+                    "function": "execute_search -> search_index",
+                    "input": {
+                        "q": query,
+                        "page": page,
+                        "limit": limit_text,
+                    },
+                    "expected": expected,
+                    "actual": actual,
+                    "expected_error": expected_error,
+                    "actual_error": actual_error,
+                })
+
+    # --- build_paginated_response -----------------------------------
+    #
+    # Slicing edges: nothing, one result, an exact multiple, and a page
+    # past the end, which clamps instead of erroring.
+    pagination_inputs = [
+        [],
+        [{"title": "one", "score": 1.0}],
+        [
+            {"title": "doc%d" % index, "score": float(index)}
+            for index in range(5)
+        ],
+    ]
+
+    for results in pagination_inputs:
+        for page in (0, 1, 2, 3, 50):
+            for page_size in (1, 2, 5, 10):
+
+                comparisons += 1
+
+                expected = original_module["build_paginated_response"](
+                    results, page, page_size
+                )
+                actual = extracted["build_paginated_response"](
+                    results, page, page_size
+                )
+
+                if expected != actual and len(differences) < limit:
+                    differences.append({
+                        "function": "build_paginated_response",
+                        "input": {
+                            "page": page,
+                            "limit": page_size,
+                            "results": len(results),
+                        },
+                        "expected": expected,
+                        "actual": actual,
+                        "expected_error": None,
+                        "actual_error": None,
+                    })
 
     # --- build_snippet_result ---------------------------------------
     #

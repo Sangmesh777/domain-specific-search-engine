@@ -102,6 +102,16 @@ EXTRACTION_PLAN["search_engine/snippet.py"] = {
 # and bulk-delete paths keep working untouched, and app.py is left with
 # no SQL, no schema and no file handling.
 
+from tools.engine_extraction_spec import (  # noqa: E402
+    DOCSTRING as ENGINE_DOCSTRING,
+    FUNCTIONS as ENGINE_FUNCTIONS,
+    IMPORTS as ENGINE_IMPORTS,
+    RENAMES as ENGINE_RENAMES,
+    TITLE as ENGINE_TITLE,
+    TRANSFORMS as ENGINE_TRANSFORMS,
+    WRAPPERS as ENGINE_WRAPPERS,
+)
+
 from tools.storage_extraction_spec import (  # noqa: E402
     CONSTANTS as STORAGE_CONSTANTS,
     DOCSTRING as STORAGE_DOCSTRING,
@@ -113,6 +123,14 @@ from tools.storage_extraction_spec import (  # noqa: E402
     TITLE as STORAGE_TITLE,
     TRANSFORMS as STORAGE_TRANSFORMS,
 )
+
+EXTRACTION_PLAN["search_engine/engine.py"] = {
+    "title": ENGINE_TITLE,
+    "functions": ENGINE_FUNCTIONS,
+    "imports": ENGINE_IMPORTS,
+    "docstring": ENGINE_DOCSTRING,
+    "wrappers": ENGINE_WRAPPERS,
+}
 
 EXTRACTION_PLAN["search_engine/storage.py"] = {
     "title": STORAGE_TITLE,
@@ -311,11 +329,13 @@ TRANSFORMS = {
 
 # The persistence layer's transforms are declared in their own module;
 # merge them once the dict exists.
+TRANSFORMS.update(ENGINE_TRANSFORMS)
 TRANSFORMS.update(STORAGE_TRANSFORMS)
 
 # A function can also change name on the way in, when its old name would
 # be ambiguous in the new module.
-EXTRACTION_RENAMES = STORAGE_RENAMES
+EXTRACTION_RENAMES = dict(ENGINE_RENAMES)
+EXTRACTION_RENAMES.update(STORAGE_RENAMES)
 
 # Call sites in app.py that must supply the newly explicit state. app.py
 # is the adapter and owns the global index, so it passes it in.
@@ -547,6 +567,16 @@ def apply_transform(name, text):
 
         text = text.replace(old_text, new_text, 1)
 
+    # Replacements that are correct at every occurrence and have no
+    # meaningful count. `jsonify(` is the case this exists for: turning
+    # a Flask handler into a transport-independent function is exactly
+    # "return the payload instead of serialising it", and the payload
+    # expression is unchanged, so `jsonify(X)` -> `(X)` is correct
+    # wherever it appears. Counting them would make the transform break
+    # every time a new early return is added.
+    for old_text, new_text in transform.get("replace_all", []):
+        text = text.replace(old_text, new_text)
+
     # Insert the extra leading parameter after the opening parenthesis of
     # the def statement.
     parameter = transform.get("add_leading_parameter")
@@ -757,6 +787,11 @@ def apply_extraction(dry_run=False):
         "    build_snippet_result,\n"
         "    get_snippet_and_page,\n"
         ")\n"
+        )
+
+    if "execute_search" in moved:
+        import_block += (
+        "from search_engine.engine import search_index\n"
         )
 
     if "sync_sqlite_from_memory" in moved:

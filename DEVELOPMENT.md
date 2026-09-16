@@ -41,6 +41,7 @@ directory. They need nothing running:
 
 ```text
 tests/test_tokenizer_contract.py        72  Unicode, sanitizer, query parsing
+tests/test_engine_layer.py              27  Transport independence of the core
 tests/test_storage_parity.py            29  The storage layer's separation
 tests/test_incremental_write_path.py    17  The extracted write path
 tests/test_index_state.py               25  Ownership and atomic publication
@@ -60,8 +61,8 @@ tests/test_golden_vectors.py             2  Full 79-vector replay
 when nothing is listening:
 
 ```text
-with a server     : 248 passed
-without a server  : 239 passed, 9 skipped
+with a server     : 275 passed
+without a server  : 266 passed, 9 skipped
 ```
 
 ## Architecture
@@ -142,7 +143,7 @@ inputs, a deterministic random corpus spanning the astral plane, and
 structured cases for multi-page documents, window sizes and missing
 documents.
 
-Current result: **10 functions, 21,365 comparisons, 0 differences.**
+Current result: **12 functions, 21,454 comparisons, 0 differences.**
 
 If a function is extracted and not added to `EXTRACTED` in
 `tools/shadow_parity.py`, the gate stops covering it — which is why
@@ -601,6 +602,57 @@ have been recorded as a passing control if the runner had not checked.
 Current result: **9 fixtures, 250,388 values compared, 0 differences**,
 and **6/6 controls detected**.
 
+### Layer 5: `search_engine/engine.py` (done, last extraction)
+
+The ranking pipeline was the last thing in `app.py` that was not an
+adapter. `execute_search` was a Flask handler: it read `request.args`,
+captured four module globals under a lock, and returned `jsonify(...)`.
+
+It is now `search_engine.engine.search_index(...)`, which takes the
+query, the two raw pagination strings and the four index containers as
+arguments and returns a plain dict. The route keeps its name and
+decorator in `app.py` and is 46 lines of transport: parse, capture one
+coherent snapshot under the lock, call, serialise.
+
+The transforms that produced it are declared in
+`tools/engine_extraction_spec.py`, and all three are behaviour-free:
+
+| Transform | Effect |
+| --- | --- |
+| `request.args.get(...)` -> a parameter | the values are passed through as the same strings, so the body's own `try`/`except` still parses them and a non-numeric `page` still falls back to 1 |
+| the snapshot capture block -> deleted | the four names it bound become parameters; the caller holds the lock |
+| `jsonify(X)` -> `(X)` | the payload expression is untouched, so the body is identical - it is returned rather than serialised |
+
+This is the last piece the Android `LocalBackend` needs, because it is
+what turns the ranking into a function of an explicit snapshot rather
+than a web request.
+
+#### Two results worth keeping
+
+**The golden vectors did not catch a real defect that shadow parity
+did.** Lowering the pagination clamp's floor from `max(1, ...)` to
+`max(0, ...)` failed shadow parity (1 difference) while the 79 golden
+vectors stayed green at 79/79. No recorded vector uses `limit=0`; the
+adversarial case set does. Both gates are needed, for different reasons.
+
+**The ranking body is now under shadow parity at all.** It was not
+before: `tools/shadow_parity.py` compares functions against the pinned
+monolith, and a Flask handler cannot be called there. The harness now
+shims `request` and `jsonify` - `jsonify` returns its argument - and
+points the original's four globals at a fixture snapshot, so the
+original body runs as a function of its arguments and the two are
+compared value for value. 29 adversarial queries (quoted phrases,
+reversed phrases, a numeric token, a filename whose tokens are not in
+alphabetical order, empty and whitespace queries, a filter that matches
+nothing, out-of-range and non-numeric pagination) plus 60 pagination
+cases.
+
+`tests/test_engine_layer.py` pins the structural half: the engine
+imports only `math`, `os`, `urllib` and `search_engine`; it reads none
+of the seven forbidden globals; `app.py` contains no ranking marker; and
+the adapter captures all four containers inside its single `with
+INDEX_DATA_LOCK`.
+
 ### Remaining extraction surface (measured)
 
 `tools/` reports this via the dependency analysis below. After layer 4,
@@ -611,7 +663,7 @@ write path, confined to exactly two functions and asserted by
 
 | Function | Lines | Reads |
 | --- | --- | --- |
-| `execute_search` | 1378 | the four index dicts, `INDEX_DATA_LOCK`, and `jsonify` |
+| `execute_search` | 46 | a thin adapter: `request.args`, `INDEX_DATA_LOCK`, `jsonify`, `search_index` |
 | `upload_file` | 157 | the four index dicts, `DATA_FOLDER` |
 | `rebuild_database` | 153 | the four index dicts, `DATA_FOLDER`, `INDEX_DATA_LOCK` |
 | `bulk_delete_documents` | 146 | the four index dicts, `DATA_FOLDER` |
