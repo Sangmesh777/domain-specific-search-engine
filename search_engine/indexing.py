@@ -32,6 +32,75 @@ from search_engine.extract import extract_pages, extract_text
 from search_engine.text import tokenize, tokenize_filename
 
 
+def extract_document(file_path, filename):
+    """
+    Turn one document file into everything the index stores for it.
+
+    This is the rule the two write paths share: what a document's
+    metadata is, how its content is tokenized and counted, how its
+    filename stem is tokenized, and which pages it has. It exists as one
+    function because it used to exist as two - the rebuild walked a
+    folder and the upload path indexed a saved file, each with its own
+    copy of these lines.
+
+    Two copies of an indexing rule is how an online index and an offline
+    one drift apart, and the offline backend would have had to choose
+    one to copy.
+
+    Returns a dict, or None when the document has no readable text. What
+    to do about an empty document is the caller's policy, not this
+    function's rule: the rebuild skips it and the upload raises, and
+    both of those behaviours are preserved.
+
+    A document the extractor cannot read at all still raises, exactly as
+    before.
+
+    `filename_words` is not deduplicated and keeps its order. It is what
+    `" ".join(filename_words)` is rebuilt from after a restart, so
+    repeated tokens and their sequence are both load-bearing.
+    """
+
+    text = extract_text(
+        file_path,
+        filename,
+    )
+
+    content_words = tokenize(text)
+
+    term_counts = {}
+
+    for word in content_words:
+        term_counts[word] = (
+            term_counts.get(word, 0)
+            + 1
+        )
+
+    pages = extract_pages(
+        file_path,
+        filename,
+    )
+
+    filename_words = tokenize_filename(
+        os.path.splitext(filename)[0]
+    )
+
+    if not content_words:
+        return None
+
+    return {
+        "metadata": {
+            "title": filename,
+            "path": os.path.abspath(file_path),
+            "total_words": len(content_words),
+            "page_count": len(pages),
+        },
+        "content_words": content_words,
+        "term_counts": term_counts,
+        "filename_words": filename_words,
+        "pages": pages,
+    }
+
+
 def resolve_document_path(
     data_folder,
     filename,
@@ -109,60 +178,34 @@ def build_index_from_folder(
         )
 
         try:
-            text = extract_text(
+            extracted = extract_document(
                 file_path,
                 filename,
             )
 
-            content_words = tokenize(text)
-
-            filename_without_extension = (
-                os.path.splitext(filename)[0]
-            )
-
-            filename_words = tokenize_filename(
-                filename_without_extension
-            )
-
-            pages = extract_pages(
-                file_path,
-                filename,
-            )
-
-            if not content_words:
+            if extracted is None:
                 print(
                     "[REBUILD] Skipped empty document: "
                     f"{filename}"
                 )
                 continue
 
-            new_document_metadata[filename] = {
-                "title": filename,
-                "path": os.path.abspath(file_path),
-                "total_words": len(content_words),
-                "page_count": len(pages),
-            }
+            new_document_metadata[filename] = extracted["metadata"]
 
             new_filename_index[
                 filename
-            ] = filename_words
+            ] = extracted["filename_words"]
 
             new_page_text_index[
                 filename
-            ] = pages
+            ] = extracted["pages"]
 
-            for word in content_words:
+            for word, count in extracted["term_counts"].items():
 
                 if word not in new_inverted_index:
                     new_inverted_index[word] = {}
 
-                if (
-                    filename
-                    not in new_inverted_index[word]
-                ):
-                    new_inverted_index[word][filename] = 0
-
-                new_inverted_index[word][filename] += 1
+                new_inverted_index[word][filename] = count
 
         except Exception as error:
 

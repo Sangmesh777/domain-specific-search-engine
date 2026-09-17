@@ -427,6 +427,128 @@ def test_the_publish_happens_under_the_lock():
     )
 
 
+# ----------------------------------------------------------------------
+# One extraction rule, not two
+# ----------------------------------------------------------------------
+
+
+def test_the_extraction_rule_lives_in_one_place():
+    """
+    The rule used to exist twice: once in the rebuild loop and once in
+    the upload path.
+
+    Two copies of an indexing rule is how an online index and an offline
+    one drift apart, and the offline backend would have had to choose
+    one to copy. This asserts the duplication has not come back.
+    """
+
+    app_source = source_of(APP_PATH)
+
+    for marker in (
+        "extract_text(",
+        "extract_pages(",
+        "tokenize(",
+        "tokenize_filename(",
+    ):
+        assert marker not in app_source, (
+            f"app.py calls {marker!r}; document extraction belongs in "
+            "search_engine/indexing.py"
+        )
+
+    # And it is present, so the pair cannot pass by both sides losing it.
+    assert "def extract_document" in source_of(INDEXING_PATH)
+
+
+def test_extract_document_returns_every_part_the_index_stores(tmp_path):
+    path = write(tmp_path / "corpus", "note.txt", "alpha beta alpha\n")
+
+    extracted = indexing.extract_document(str(path), "note.txt")
+
+    assert set(extracted) == {
+        "metadata",
+        "content_words",
+        "term_counts",
+        "filename_words",
+        "pages",
+    }
+
+    assert extracted["metadata"] == {
+        "title": "note.txt",
+        "path": str(path.resolve()),
+        "total_words": 3,
+        "page_count": len(extracted["pages"]),
+    }
+
+    assert extracted["term_counts"] == {"alpha": 2, "beta": 1}
+    assert extracted["content_words"] == ["alpha", "beta", "alpha"]
+    assert extracted["filename_words"] == ["note"]
+
+
+def test_extract_document_keeps_filename_order_and_repeats(tmp_path):
+    path = write(tmp_path / "corpus", "zulu alpha zulu.txt", "text\n")
+
+    extracted = indexing.extract_document(str(path), "zulu alpha zulu.txt")
+
+    assert extracted["filename_words"] == ["zulu", "alpha", "zulu"]
+
+
+def test_extract_document_returns_none_for_an_empty_document(tmp_path):
+    """
+    None, not an exception: the policy belongs to the caller.
+
+    The rebuild skips an empty document and the upload raises, and both
+    behaviours are preserved - so the shared rule must not choose for
+    them.
+    """
+
+    path = write(tmp_path / "corpus", "empty.txt", "")
+
+    assert indexing.extract_document(str(path), "empty.txt") is None
+
+
+def test_the_two_paths_agree_on_the_same_document(tmp_path):
+    """
+    The point of sharing the rule, checked directly.
+
+    `build_index_from_folder` and `extract_document` must produce the
+    same metadata, postings and filename tokens for the same file, or
+    the online and offline indexes would disagree about it.
+    """
+
+    folder = tmp_path / "corpus"
+    path = write(folder, "zulu alpha mike.txt", "gamma delta gamma\n")
+
+    extracted = indexing.extract_document(str(path), "zulu alpha mike.txt")
+
+    snapshot = indexing.build_index_from_folder(folder)
+
+    name = "zulu alpha mike.txt"
+
+    assert snapshot["document_metadata"][name] == extracted["metadata"]
+    assert snapshot["filename_index"][name] == extracted["filename_words"]
+    assert snapshot["page_text_index"][name] == extracted["pages"]
+
+    assert snapshot["inverted_index"]["gamma"] == {name: 2}
+    assert snapshot["inverted_index"]["delta"] == {name: 1}
+
+    assert extracted["term_counts"] == {"gamma": 2, "delta": 1}
+
+
+def test_the_upload_path_raises_on_an_empty_document(app_module, tmp_path):
+    """
+    The policy that must survive the sharing.
+
+    `storage_equivalence` records `FAILED:...:ValueError` for this case,
+    so the exception type is observable behaviour, not an implementation
+    detail.
+    """
+
+    path = write(tmp_path / "corpus", "empty.txt", "")
+
+    with pytest.raises(ValueError):
+        app_module.incrementally_index_document(str(path), str(path))
+
+
 def test_the_path_guard_lives_in_the_module_and_is_wrapped():
     """Both halves: the guard moved, and the call site still resolves."""
 

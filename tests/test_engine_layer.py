@@ -53,6 +53,20 @@ FORBIDDEN_GLOBALS = (
 )
 
 
+def function_source(path, name):
+    """The source segment of one top-level function."""
+
+    source = source_of(path)
+
+    tree = ast.parse(source)
+
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return ast.get_source_segment(source, node) or ""
+
+    raise AssertionError(f"{name} is not defined in {path}")
+
+
 def source_of(path):
     return path.read_text(encoding="utf-8")
 
@@ -300,6 +314,96 @@ def test_the_route_still_decorates_the_adapter():
 
 
 # ----------------------------------------------------------------------
+# 2. The remaining handlers are adapters
+# ----------------------------------------------------------------------
+
+# Every function that belongs to the engine, the storage layer or the
+# ranking core. A route handler calling one of these directly is doing
+# engine work with the wrong owner.
+ENGINE_OWNED = (
+    "tokenize(",
+    "tokenize_filename(",
+    "extract_text(",
+    "extract_pages(",
+    "count_phrase_occurrences(",
+    "normalize_search_query(",
+    "parse_filetype_filter(",
+    "build_index_from_folder(",
+    "replace_document_rows(",
+    "delete_document_rows(",
+)
+
+HANDLERS = (
+    "upload_file",
+    "bulk_delete_documents",
+    "open_document",
+    "rebuild_database_background",
+    "execute_search",
+)
+
+
+@pytest.mark.parametrize("handler", HANDLERS)
+def test_handlers_hold_no_engine_logic(handler):
+    """
+    The remaining handlers are transport.
+
+    Their length comes from request parsing, response construction and
+    status bookkeeping. This is what stops engine rules growing back
+    into them, which is the failure mode the whole extraction exists to
+    prevent.
+    """
+
+    body = function_source(APP_PATH, handler)
+
+    for marker in ENGINE_OWNED:
+        assert marker not in body, (
+            f"{handler} calls {marker!r} directly; that belongs behind "
+            "the engine or storage boundary"
+        )
+
+    # Delegating to the engine is the adapter's job, so `search_index`
+    # is deliberately not on the forbidden list. It is asserted the
+    # other way round in `test_the_adapter_is_the_only_caller_of_the_engine`.
+
+
+@pytest.mark.parametrize("handler", HANDLERS)
+def test_handlers_hold_no_sql(handler):
+    body = function_source(APP_PATH, handler)
+
+    for marker in ("INSERT INTO", "DELETE FROM", "SELECT ", "PRAGMA"):
+        assert marker not in body, f"{handler} contains {marker!r}"
+
+
+def test_the_directory_walk_lives_in_the_indexing_layer():
+    """Rebuilding a folder is the indexing layer's job, not a route's."""
+
+    for marker in ("os.listdir", "supported_extensions"):
+        assert marker not in source_of(APP_PATH), (
+            f"app.py contains {marker!r}"
+        )
+
+    assert "os.listdir" in source_of(
+        REPO_ROOT / "search_engine" / "indexing.py"
+    )
+
+
+def test_the_background_handler_only_schedules():
+    """
+    It may start a build and report status, but must not build inline.
+
+    A build inside the thread body would run the extraction inside the
+    request-serving process without the status transitions around it.
+    """
+
+    body = function_source(APP_PATH, "rebuild_database_background")
+
+    assert "rebuild_database(" in body
+
+    for marker in ENGINE_OWNED:
+        assert marker not in body
+
+
+# ----------------------------------------------------------------------
 # 3. Independence: callable with no Flask, no request, no globals
 # ----------------------------------------------------------------------
 
@@ -313,8 +417,16 @@ def test_search_runs_without_a_flask_app():
     through HTTP to be compared.
     """
 
-    assert "flask" not in sys.modules or True  # the point is the call below
-
+    # This used to assert `"flask" not in sys.modules or True`, which is
+    # always true, so the one test named "runs without a flask app"
+    # asserted nothing about Flask. An assertion about what is in
+    # `sys.modules` here would be no better: whether Flask has been
+    # imported depends on which other test files ran first, which makes
+    # the result an accident of ordering rather than a property of the
+    # engine. The real proof is `tests/test_core_is_transport_free.py`,
+    # which blocks the import outright in a subprocess and then imports
+    # and runs the package. What is checked here is that the call itself
+    # needs no app, no request context and no client.
     payload = search("alpha")
 
     assert isinstance(payload, dict)
