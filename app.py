@@ -2,8 +2,6 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
 import os
-import json
-import sqlite3
 import math
 import re
 import PyPDF2
@@ -28,7 +26,15 @@ CORS(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-DATA_FOLDER = os.path.join(BASE_DIR, "data")
+# The corpus location can be redirected so that the engine can be run
+# against a throwaway directory. This is used by the hermetic test
+# suite and by the golden-vector / corpus-sidecar generators, which
+# must never touch the developer's real corpus.
+#
+# Default behaviour is unchanged: <repo>/data
+DATA_FOLDER = os.environ.get(
+    "SEARCH_ENGINE_DATA_DIR"
+) or os.path.join(BASE_DIR, "data")
 
 INDEX_FILE = os.path.join(DATA_FOLDER, "inverted_index.json")
 META_FILE = os.path.join(DATA_FOLDER, "document_meta.json")
@@ -51,858 +57,59 @@ if not os.path.exists(DATA_FOLDER):
 # TOKENIZERS
 # ============================================================
 
-def tokenize(text):
-    """Tokenize normal document content."""
 
-    text = text.lower()
-
-    cleaned_text = "".join(
-        character
-        if character.isalnum() or character.isspace()
-        else " "
-        for character in text
-    )
-
-    return [
-        word
-        for word in cleaned_text.split()
-        if len(word) > 1
-    ]
+from search_engine.index_state import (
+    IndexState,
+    SnapshotIncompleteError,
+    plan_remove_document,
+    plan_upsert_document,
+)
+from search_engine.sanitize import sanitize_upload_filename
+from search_engine.text import (
+    normalize_search_query,
+    parse_filetype_filter,
+    tokenize,
+    tokenize_filename,
+)
 
 
-def tokenize_filename(text):
-    """
-    Tokenize filenames and search queries while preserving
-    numeric tokens such as 1, 2, and 3.
-    """
-
-    text = text.lower()
-
-    cleaned_text = "".join(
-        character
-        if character.isalnum() or character.isspace()
-        else " "
-        for character in text
-    )
-
-    return [
-        word
-        for word in cleaned_text.split()
-        if word
-    ]
 
 
-def normalize_search_query(query):
-    """
-    Normalize a search query before filename/content matching.
-
-    A supported document extension at the end of the query is
-    removed so that:
-
-        BCS502 Module 2.pdf
-        BCS502 Module 2
-
-    are treated as the same filename search.
-
-    Supported extensions:
-        .pdf
-        .docx
-        .txt
-    """
-
-    query = query.strip()
-
-    if not query:
-        return ""
-
-    # Handle a quoted query such as:
-    # "BCS502 Module 2.pdf"
-    quote_wrapped = (
-        len(query) >= 2
-        and query.startswith('"')
-        and query.endswith('"')
-    )
-
-    if quote_wrapped:
-        query = query[1:-1].strip()
-
-    lower_query = query.lower()
-
-    supported_extensions = (
-        ".pdf",
-        ".docx",
-        ".txt"
-    )
-
-    for extension in supported_extensions:
-
-        if lower_query.endswith(extension):
-
-            query = query[
-                :-len(extension)
-            ].rstrip()
-
-            break
-
-    if quote_wrapped:
-        return f'"{query}"'
-
-    return query
 
 
-def parse_filetype_filter(query):
-    """
-    Extract an optional document-type filter from a raw search query.
 
-    Supported forms:
-        pdf
-        .pdf
-        network pdf
-        network .pdf
-        BCS502 Module 2.pdf
-        "BCS502 Module 2.pdf"
-
-    Returns:
-        (remaining_keyword_query, filetype_filter)
-    """
-
-    query = query.strip()
-
-    supported_extensions = (
-        (".pdf", "pdf"),
-        (".docx", "docx"),
-        (".txt", "txt"),
-    )
-
-    # Handle an extension attached to the final filename token,
-    # including a quoted filename.
-    for extension, filetype in supported_extensions:
-
-        quoted_suffix = f'{extension}"'
-
-        if query.lower().endswith(
-            quoted_suffix
-        ):
-            return (
-                query[
-                    :-len(quoted_suffix)
-                ].rstrip() + '"'
-                if query[
-                    :-len(quoted_suffix)
-                ].rstrip()
-                else "",
-                filetype,
-            )
-
-        if query.lower().endswith(
-            extension
-        ):
-
-            return (
-                query[
-                    :-len(extension)
-                ].rstrip(),
-                filetype,
-            )
-
-    # Handle standalone type tokens, e.g.:
-    #   network pdf
-    #   customer .docx
-    tokens = query.split()
-
-    if not tokens:
-        return query, None
-
-    supported_types = {
-        "pdf": "pdf",
-        ".pdf": "pdf",
-        "docx": "docx",
-        ".docx": "docx",
-        "txt": "txt",
-        ".txt": "txt",
-    }
-
-    detected_type = None
-    remaining_tokens = []
-
-    for token in tokens:
-
-        normalized = token.lower().strip()
-
-        if normalized in supported_types:
-
-            if detected_type is None:
-                detected_type = supported_types[
-                    normalized
-                ]
-
-            continue
-
-        remaining_tokens.append(token)
-
-    return (
-        " ".join(remaining_tokens).strip(),
-        detected_type,
-    )
 
 
 # ============================================================
 # DOCUMENT EXTRACTION
 # ============================================================
 
-def extract_text(file_path, filename):
-    """Extract complete text from PDF, DOCX, or TXT."""
 
-    text = ""
-
-    try:
-        filename_lower = filename.lower()
-
-        if filename_lower.endswith(".pdf"):
-
-            with open(file_path, "rb") as file:
-                reader = PyPDF2.PdfReader(file)
-
-                for page in reader.pages:
-
-                    extracted = page.extract_text()
-
-                    if extracted:
-                        text += extracted + " "
-
-        elif filename_lower.endswith(".docx"):
-
-            document = docx.Document(file_path)
-
-            for paragraph in document.paragraphs:
-                text += paragraph.text + " "
-
-        elif filename_lower.endswith(".txt"):
-
-            with open(
-                file_path,
-                "r",
-                encoding="utf-8"
-            ) as file:
-                text = file.read()
-
-    except Exception as error:
-
-        print(
-            f"[ERROR] Could not read {filename}: {error}"
-        )
-
-    return text.lower()
+from search_engine.extract import (
+    count_phrase_occurrences,
+    extract_pages,
+    extract_text,
+)
+from search_engine.snippet import (
+    build_snippet_result,
+    get_snippet_and_page,
+)
 
 
-def extract_pages(file_path, filename):
-    """
-    Extract page-level text.
-
-    PDFs:
-        returns [{"page": 1, "text": "..."}]
-
-    DOCX/TXT:
-        treated as one logical page.
-    """
-
-    pages = []
-
-    try:
-
-        filename_lower = filename.lower()
-
-        if filename_lower.endswith(".pdf"):
-
-            with open(file_path, "rb") as file:
-
-                reader = PyPDF2.PdfReader(file)
-
-                for page_number, page in enumerate(
-                    reader.pages,
-                    start=1
-                ):
-
-                    extracted = page.extract_text()
-
-                    if extracted:
-                        pages.append({
-                            "page": page_number,
-                            "text": extracted.lower()
-                        })
-
-        elif filename_lower.endswith(".docx"):
-
-            document = docx.Document(file_path)
-
-            text = "\n".join(
-                paragraph.text
-                for paragraph in document.paragraphs
-            )
-
-            if text.strip():
-                pages.append({
-                    "page": 1,
-                    "text": text.lower()
-                })
-
-        elif filename_lower.endswith(".txt"):
-
-            with open(
-                file_path,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                text = file.read()
-
-                if text.strip():
-                    pages.append({
-                        "page": 1,
-                        "text": text.lower()
-                    })
-
-    except Exception as error:
-
-        print(
-            f"[ERROR] Could not extract pages from "
-            f"{filename}: {error}"
-        )
-
-    return pages
 
 
-def count_phrase_occurrences(text, phrase):
-    """
-    Count exact adjacent occurrences of a normalized phrase.
 
-    A phrase occurrence means the query terms appear next to each
-    other in the same order. Word proximity without adjacency is
-    not counted.
-    """
-
-    if not text or not phrase:
-        return 0
-
-    normalized_text = " ".join(
-        text.lower().split()
-    )
-
-    normalized_phrase = " ".join(
-        phrase.lower().split()
-    )
-
-    if not normalized_phrase:
-        return 0
-
-    count = 0
-    start = 0
-
-    while True:
-
-        position = normalized_text.find(
-            normalized_phrase,
-            start
-        )
-
-        if position == -1:
-            break
-
-        count += 1
-
-        start = (
-            position
-            +
-            len(normalized_phrase)
-        )
-
-    return count
 
 
 # ============================================================
 # PAGE-AWARE SNIPPET
 # ============================================================
 
-def get_snippet_and_page(
-    filename,
-    query_words,
-    window=140
-):
-    """
-    Return the best matching page/snippet.
 
-    Match priority:
-    1. Exact multi-word phrase.
-    2. Exact token occurrence.
-    3. Prefix occurrence.
-    4. Nearby/proximity fallback.
 
-    Highlights are relative to the returned snippet.
-    """
 
-    pages = PAGE_TEXT_INDEX.get(
-        filename,
-        []
-    )
 
-    if not pages:
-        return {
-            "snippet": "No readable text found.",
-            "page": None,
-            "highlights": []
-        }
 
-    cleaned_words = [
-        word.lower().strip()
-        for word in query_words
-        if word
-    ]
-
-    cleaned_words = list(
-        dict.fromkeys(cleaned_words)
-    )
-
-    if not cleaned_words:
-        return {
-            "snippet": "No matching text found.",
-            "page": None,
-            "highlights": []
-        }
-
-    phrase = " ".join(cleaned_words)
-
-    # --------------------------------------------------------
-    # 1. EXACT PHRASE
-    # --------------------------------------------------------
-    if len(cleaned_words) >= 2:
-
-        for page_data in pages:
-
-            page_number = page_data["page"]
-
-            original_text = " ".join(
-                page_data["text"].split()
-            )
-
-            lower_text = original_text.lower()
-
-            phrase_position = lower_text.find(
-                phrase
-            )
-
-            if phrase_position != -1:
-
-                return build_snippet_result(
-                    original_text,
-                    page_number,
-                    phrase_position,
-                    len(phrase),
-                    window,
-                    phrase
-                )
-
-    # --------------------------------------------------------
-    # 2. EXACT TOKEN
-    # --------------------------------------------------------
-    exact_candidates = []
-
-    for page_data in pages:
-
-        page_number = page_data["page"]
-
-        original_text = " ".join(
-            page_data["text"].split()
-        )
-
-        lower_text = original_text.lower()
-
-        for word in cleaned_words:
-
-            # Token boundary-aware exact matching.
-            pattern = (
-                r"(?<![a-z0-9])"
-                +
-                re.escape(word)
-                +
-                r"(?![a-z0-9])"
-            )
-
-            match = re.search(
-                pattern,
-                lower_text
-            )
-
-            if match:
-
-                exact_candidates.append({
-                    "page": page_number,
-                    "position": match.start(),
-                    "length": len(word),
-                    "text": original_text,
-                    "word": word,
-                    "score": 100000
-                })
-
-    if exact_candidates:
-
-        # Prefer the first exact candidate in the earliest page only after
-        # exactness has been established.
-        best = exact_candidates[0]
-
-        return build_snippet_result(
-            best["text"],
-            best["page"],
-            best["position"],
-            best["length"],
-            window,
-            best["word"]
-        )
-
-    # --------------------------------------------------------
-    # 3. PREFIX MATCH
-    # --------------------------------------------------------
-    prefix_candidates = []
-
-    for page_data in pages:
-
-        page_number = page_data["page"]
-
-        original_text = " ".join(
-            page_data["text"].split()
-        )
-
-        lower_text = original_text.lower()
-
-        for word in cleaned_words:
-
-            if len(word) < 3:
-                continue
-
-            pattern = (
-                r"(?<![a-z0-9])"
-                +
-                re.escape(word)
-                +
-                r"[a-z0-9]+"
-            )
-
-            match = re.search(
-                pattern,
-                lower_text
-            )
-
-            if match:
-
-                matched_text = match.group(0)
-
-                prefix_similarity = (
-                    len(word)
-                    /
-                    float(
-                        max(
-                            len(matched_text),
-                            1
-                        )
-                    )
-                )
-
-                prefix_candidates.append({
-                    "page": page_number,
-                    "position": match.start(),
-                    "length": len(matched_text),
-                    "text": original_text,
-                    "word": word,
-                    "score":
-                        50000
-                        +
-                        prefix_similarity
-                })
-
-    if prefix_candidates:
-
-        best = max(
-            prefix_candidates,
-            key=lambda item: item["score"]
-        )
-
-        return build_snippet_result(
-            best["text"],
-            best["page"],
-            best["position"],
-            best["length"],
-            window,
-            best["word"]
-        )
-
-    # --------------------------------------------------------
-    # 4. PROXIMITY FALLBACK
-    # --------------------------------------------------------
-    best = None
-    best_score = -1
-
-    for page_data in pages:
-
-        page_number = page_data["page"]
-
-        original_text = " ".join(
-            page_data["text"].split()
-        )
-
-        lower_text = original_text.lower()
-
-        if not lower_text:
-            continue
-
-        candidates = []
-
-        for word in cleaned_words:
-
-            search_position = 0
-
-            while True:
-
-                position = lower_text.find(
-                    word,
-                    search_position
-                )
-
-                if position == -1:
-                    break
-
-                candidates.append(
-                    (
-                        position,
-                        word
-                    )
-                )
-
-                search_position = (
-                    position + len(word)
-                )
-
-        for (
-            position,
-            matched_word
-        ) in candidates:
-
-            local_start = max(
-                0,
-                position - window
-            )
-
-            local_end = min(
-                len(original_text),
-                position + window
-            )
-
-            local_text = lower_text[
-                local_start:local_end
-            ]
-
-            nearby_terms = sum(
-                1
-                for word
-                in cleaned_words
-                if word in local_text
-            )
-
-            candidate_score = (
-                nearby_terms * 1000
-                +
-                len(matched_word)
-            )
-
-            if candidate_score > best_score:
-
-                best_score = candidate_score
-
-                best = {
-                    "page": page_number,
-                    "position": position,
-                    "length": len(matched_word),
-                    "text": original_text,
-                    "score": candidate_score
-                }
-
-    if best is None:
-
-        return {
-            "snippet": "No matching text found.",
-            "page": None,
-            "highlights": []
-        }
-
-    return build_snippet_result(
-        best["text"],
-        best["page"],
-        best["position"],
-        best["length"],
-        window,
-        phrase
-    )
-
-
-def build_snippet_result(
-    text,
-    page_number,
-    position,
-    match_length,
-    window,
-    highlight_query
-):
-    """
-    Build the final snippet and highlight ranges around a chosen match.
-    """
-
-    start = max(
-        0,
-        position - window
-    )
-
-    end = min(
-        len(text),
-        position + match_length + window
-    )
-
-    snippet = text[
-        start:end
-    ].strip()
-
-    if start > 0:
-        first_space = snippet.find(" ")
-
-        if first_space != -1:
-            snippet = snippet[
-                first_space + 1:
-            ]
-
-        snippet = "... " + snippet
-
-    if end < len(text):
-        last_space = snippet.rfind(" ")
-
-        if last_space != -1:
-            snippet = snippet[
-                :last_space
-            ]
-
-        snippet += " ..."
-
-    highlights = []
-
-    lower_snippet = snippet.lower()
-    query = " ".join(
-        highlight_query.lower().split()
-    )
-
-    # Exact phrase/token first.
-    search_position = 0
-
-    while True:
-
-        found = lower_snippet.find(
-            query,
-            search_position
-        )
-
-        if found == -1:
-            break
-
-        highlights.append({
-            "start": found,
-            "end": found + len(query)
-        })
-
-        search_position = (
-            found + len(query)
-        )
-
-    # If the exact query is not present in the snippet because the selected
-    # match is a longer prefix token, highlight the query prefix.
-    if not highlights and query:
-
-        pattern = re.compile(
-            re.escape(query),
-            re.IGNORECASE
-        )
-
-        for match in pattern.finditer(
-            lower_snippet
-        ):
-
-            highlights.append({
-                "start": match.start(),
-                "end": match.end()
-            })
-
-    # Merge overlapping/touching ranges.
-    highlights.sort(
-        key=lambda item: item["start"]
-    )
-
-    merged = []
-
-    for item in highlights:
-
-        if not merged:
-
-            merged.append(item)
-            continue
-
-        previous = merged[-1]
-
-        if item["start"] <= previous["end"]:
-
-            previous["end"] = max(
-                previous["end"],
-                item["end"]
-            )
-
-        else:
-
-            merged.append(item)
-
-    return {
-        "snippet": snippet,
-        "page": page_number,
-        "highlights": merged
-    }
-
-
-
-def sanitize_upload_filename(filename):
-    """
-    Return a safe local filename for an uploaded document.
-
-    Only the final filename is stored in DATA_FOLDER. Directory
-    components are removed to prevent path traversal.
-
-    Returns an empty string when the filename is invalid or the
-    extension is unsupported.
-    """
-
-    if not filename:
-        return ""
-
-    safe_name = secure_filename(
-        os.path.basename(filename)
-    )
-
-    if not safe_name:
-        return ""
-
-    supported_extensions = (
-        ".pdf",
-        ".docx",
-        ".txt",
-    )
-
-    if not safe_name.lower().endswith(
-        supported_extensions
-    ):
-        return ""
-
-    return safe_name
 
 
 # ============================================================
@@ -913,6 +120,133 @@ REAL_INVERTED_INDEX = {}
 DOCUMENT_METADATA = {}
 FILENAME_INDEX = {}
 PAGE_TEXT_INDEX = {}
+
+# ------------------------------------------------------------------
+# INDEX STATE OWNERSHIP
+# ------------------------------------------------------------------
+#
+# INDEX_STATE owns the four containers above. The legacy global names
+# are kept because the ranking and persistence code still reads them
+# directly, but they must always refer to the *same objects* as
+# INDEX_STATE's, or a reader could see a mixture of two generations.
+#
+# The four globals are rebound in exactly five places, and every one
+# of them goes through publish_index_state(). That function must be
+# called under INDEX_DATA_LOCK; it swaps the containers and re-points
+# the globals in the same critical section:
+#
+#   1. load_database_from_sqlite  (SQLite restore at startup)
+#   2. load_database              (JSON snapshot restore at startup)
+#   3. rebuild_database           (atomic swap after a full rebuild)
+#   4. incrementally_index_document  (single-document upsert)
+#   5. incrementally_remove_document (single-document delete)
+#
+# publish_index_state() is the only thing that calls replace_snapshot,
+# and two structural tests in tests/test_memory_mutation_atomicity.py
+# enforce both halves of that rule against the source. It matters
+# because execute_search captures all four globals under this lock, so a
+# sync performed after releasing it would let a reader capture a
+# half-rebound set - one global from the new generation, one from the
+# old.
+#
+# assert_index_state_consistent() proves the invariant, and
+# tests/test_index_state.py exercises those paths.
+#
+# MEMORY MUTATION IS COPY-ON-WRITE
+# ---------------------------------
+# Every in-memory index change now builds replacement containers and
+# publishes them in a single swap, through publish_index_state() above.
+# Nothing mutates a published container any more, so a search that
+# captured its four references under INDEX_DATA_LOCK sees one complete
+# generation.
+#
+# The two mutation helpers that used to write into the live containers
+# in place (_remove_document_from_memory and _add_document_to_memory)
+# are gone. Their logic lives in search_engine/index_state.py as the
+# pure functions plan_remove_document, plan_add_document and
+# plan_upsert_document, which build and return replacements and mutate
+# nothing.
+#
+# incrementally_index_document uses plan_upsert_document so that a
+# re-upload publishes once rather than twice, and always drops the
+# previous revision's terms.
+#
+# tools/shadow_parity.py proves the resulting state is identical to what
+# the original in-place helpers produced, by running the originals from
+# a pinned git revision against the same input and comparing all four
+# containers.
+# ------------------------------------------------------------------
+
+INDEX_STATE = IndexState(
+    inverted_index=REAL_INVERTED_INDEX,
+    document_metadata=DOCUMENT_METADATA,
+    filename_index=FILENAME_INDEX,
+    page_text_index=PAGE_TEXT_INDEX,
+)
+
+
+def sync_index_globals_from_state():
+    """
+    Point the legacy module globals at INDEX_STATE's containers.
+
+    Not called directly any more. Use publish_index_state(), which does
+    this inside the same INDEX_DATA_LOCK critical section that swaps the
+    state. Calling it on its own leaves a window in which the four
+    globals name different generations, and execute_search captures all
+    four of them under that lock.
+    """
+
+    global REAL_INVERTED_INDEX
+    global DOCUMENT_METADATA
+    global FILENAME_INDEX
+    global PAGE_TEXT_INDEX
+
+    snapshot = INDEX_STATE.snapshot()
+
+    REAL_INVERTED_INDEX = snapshot["inverted_index"]
+    DOCUMENT_METADATA = snapshot["document_metadata"]
+    FILENAME_INDEX = snapshot["filename_index"]
+    PAGE_TEXT_INDEX = snapshot["page_text_index"]
+
+
+def publish_index_state(replacement):
+    """
+    Publish a replacement snapshot and re-point the legacy globals.
+
+    MUST be called while holding INDEX_DATA_LOCK. Readers capture all
+    four globals under that same lock, so publishing outside it would
+    let a reader observe two generations at once, which is exactly the
+    incoherence this whole mechanism exists to prevent.
+    """
+
+    INDEX_STATE.replace_snapshot(replacement)
+    sync_index_globals_from_state()
+
+
+def assert_index_state_consistent():
+    """
+    Raise AssertionError unless the legacy globals and INDEX_STATE name
+    the same four objects.
+
+    A fast identity check, cheap enough to call from tests after every
+    path that mutates the index.
+    """
+
+    snapshot = INDEX_STATE.snapshot()
+
+    for name, legacy, owned in (
+        ("REAL_INVERTED_INDEX", REAL_INVERTED_INDEX, snapshot["inverted_index"]),
+        ("DOCUMENT_METADATA", DOCUMENT_METADATA, snapshot["document_metadata"]),
+        ("FILENAME_INDEX", FILENAME_INDEX, snapshot["filename_index"]),
+        ("PAGE_TEXT_INDEX", PAGE_TEXT_INDEX, snapshot["page_text_index"]),
+    ):
+        if legacy is not owned:
+            raise AssertionError(
+                f"{name} has desynchronised from INDEX_STATE: the module "
+                "global and the owned container are different objects. "
+                "A rebinding site was added without going through "
+                "INDEX_STATE.replace_snapshot + sync_index_globals_from_state."
+            )
 
 # ============================================================
 # INDEXING STATE
@@ -1068,84 +402,73 @@ def start_background_rebuild():
 # SQLITE INCREMENTAL INDEX
 # ============================================================
 
-SQLITE_SCHEMA = """
-PRAGMA journal_mode=WAL;
 
-CREATE TABLE IF NOT EXISTS documents (
-    filename TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    path TEXT NOT NULL,
-    total_words INTEGER NOT NULL,
-    page_count INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS term_postings (
-    term TEXT NOT NULL,
-    filename TEXT NOT NULL,
-    term_count INTEGER NOT NULL,
-    PRIMARY KEY (term, filename)
-);
-
-CREATE INDEX IF NOT EXISTS idx_term_postings_term
-ON term_postings(term);
-
-CREATE INDEX IF NOT EXISTS idx_term_postings_filename
-ON term_postings(filename);
-
-CREATE TABLE IF NOT EXISTS filename_terms (
-    filename TEXT NOT NULL,
-    term TEXT NOT NULL,
-    PRIMARY KEY (filename, term)
-);
-
-CREATE INDEX IF NOT EXISTS idx_filename_terms_term
-ON filename_terms(term);
-
-CREATE TABLE IF NOT EXISTS pages (
-    filename TEXT NOT NULL,
-    page_number INTEGER NOT NULL,
-    text TEXT NOT NULL,
-    PRIMARY KEY (filename, page_number)
-);
-"""
-
+# ============================================================
+# PERSISTENCE ADAPTERS
+# ============================================================
+#
+# Every function below is a thin adapter over search_engine/storage.py.
+# The storage layer owns the SQL, the schema, the JSON files and the
+# filesystem paths; this file owns publication and the module-level
+# index globals. Nothing here may grow storage logic back into the
+# application.
 
 def get_sqlite_connection():
-    connection = sqlite3.connect(
-        SQLITE_DB_FILE,
-        timeout=30,
-    )
+    """
+    Thin adapter over storage.get_sqlite_connection.
 
-    connection.execute(
-        "PRAGMA foreign_keys = ON"
-    )
+    Kept so the document-import and bulk-delete paths - which this
+    milestone must not touch - keep their existing call sites.
+    """
 
-    return connection
+    return storage.get_sqlite_connection(
+        SQLITE_DB_FILE
+    )
 
 
 def initialize_sqlite_store():
     """
-    Create the SQLite index.
+    Create the SQLite index, migrating once if it is empty.
 
-    If search.db is empty but the legacy JSON index contains data,
-    migrate the existing index once. Future document changes use
-    incremental SQLite updates instead of full JSON rebuilds.
+    Orchestration only: the schema, the migration write and the
+    reconstruction all live in search_engine/storage.py. The single
+    connection is held here so the schema, the emptiness check and a
+    possible migration happen on one connection, exactly as before.
     """
 
     os.makedirs(DATA_FOLDER, exist_ok=True)
 
     with get_sqlite_connection() as connection:
 
-        connection.executescript(
-            SQLITE_SCHEMA
+        storage.create_schema(
+            connection
         )
 
-        count = connection.execute(
-            "SELECT COUNT(*) FROM documents"
-        ).fetchone()[0]
+        # Repair databases written before filename_terms carried an
+        # explicit position. The correct token sequence is derivable
+        # from the document name, so this needs no document re-reading
+        # and is a no-op once the table is correct.
+        filename_term_migration = storage.migrate_filename_terms(
+            connection,
+            tokenize_filename=tokenize_filename,
+        )
 
         if (
-            count == 0
+            filename_term_migration["schema_changed"]
+            or filename_term_migration["repaired"]
+            or filename_term_migration["orphans_removed"]
+        ):
+            print(
+                "[DATABASE] filename_terms migrated: "
+                f"schema_changed="
+                f"{filename_term_migration['schema_changed']}, "
+                f"repaired={len(filename_term_migration['repaired'])}, "
+                f"orphans_removed="
+                f"{len(filename_term_migration['orphans_removed'])}"
+            )
+
+        if (
+            storage.count_documents(connection) == 0
             and DOCUMENT_METADATA
         ):
             sync_sqlite_from_memory(
@@ -1159,360 +482,132 @@ def initialize_sqlite_store():
 
 def sync_sqlite_from_memory(connection=None):
     """
-    Full synchronization used only for initial migration or an explicit
-    manual full rebuild. Normal uploads/deletes do NOT call this.
+    Thin adapter: publish-then-persist bookkeeping stays in app.py.
+
+    The snapshot is read through IndexState rather than off the module
+    globals. They name the same objects, but this way the four
+    containers provably come from one generation.
     """
 
-    close_connection = False
+    snapshot = INDEX_STATE.snapshot()
 
-    if connection is None:
-        connection = get_sqlite_connection()
-        close_connection = True
-
-    try:
-        connection.execute(
-            "DELETE FROM term_postings"
-        )
-
-        connection.execute(
-            "DELETE FROM filename_terms"
-        )
-
-        connection.execute(
-            "DELETE FROM pages"
-        )
-
-        connection.execute(
-            "DELETE FROM documents"
-        )
-
-        for filename, metadata in DOCUMENT_METADATA.items():
-
-            connection.execute(
-                """
-                INSERT INTO documents
-                (filename, title, path, total_words, page_count)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    filename,
-                    metadata["title"],
-                    metadata["path"],
-                    metadata["total_words"],
-                    metadata["page_count"],
-                ),
-            )
-
-        for term, posting_list in REAL_INVERTED_INDEX.items():
-
-            connection.executemany(
-                """
-                INSERT INTO term_postings
-                (term, filename, term_count)
-                VALUES (?, ?, ?)
-                """,
-                [
-                    (
-                        term,
-                        filename,
-                        count,
-                    )
-                    for filename, count
-                    in posting_list.items()
-                ],
-            )
-
-        for filename, filename_words in FILENAME_INDEX.items():
-
-            # Store unique terms only.
-            connection.executemany(
-                """
-                INSERT OR IGNORE INTO filename_terms
-                (filename, term)
-                VALUES (?, ?)
-                """,
-                [
-                    (
-                        filename,
-                        term,
-                    )
-                    for term in set(filename_words)
-                ],
-            )
-
-        for filename, pages in PAGE_TEXT_INDEX.items():
-
-            connection.executemany(
-                """
-                INSERT INTO pages
-                (filename, page_number, text)
-                VALUES (?, ?, ?)
-                """,
-                [
-                    (
-                        filename,
-                        page_data["page"],
-                        page_data["text"],
-                    )
-                    for page_data in pages
-                ],
-            )
-
-        connection.commit()
-
-    finally:
-
-        if close_connection:
-            connection.close()
+    # Named rather than splatted: snapshot() also carries `generation`,
+    # which is not part of the persisted state.
+    return storage.sync_sqlite_from_memory(
+        db_path=SQLITE_DB_FILE,
+        connection=connection,
+        inverted_index=snapshot["inverted_index"],
+        document_metadata=snapshot["document_metadata"],
+        filename_index=snapshot["filename_index"],
+        page_text_index=snapshot["page_text_index"],
+    )
 
 
 def load_database_from_sqlite():
     """
-    Load the complete persisted SQLite snapshot into the existing
-    in-memory search structures once at application startup.
+    Rebuild from SQLite, then publish once under the lock.
+
+    storage returns a complete snapshot and installs nothing, so the
+    publication order stays in one place in this file.
     """
 
-    global REAL_INVERTED_INDEX
-    global DOCUMENT_METADATA
-    global FILENAME_INDEX
-    global PAGE_TEXT_INDEX
+    replacement = storage.load_database_from_sqlite(
+        db_path=SQLITE_DB_FILE,
+    )
 
-    with get_sqlite_connection() as connection:
+    # An empty SQLite store means "leave the active state alone", which
+    # is what the original early return did.
+    if replacement is None:
+        return
 
-        document_rows = connection.execute(
-            """
-            SELECT
-                filename,
-                title,
-                path,
-                total_words,
-                page_count
-            FROM documents
-            """
-        ).fetchall()
+    with INDEX_DATA_LOCK:
 
-        if not document_rows:
-            return
-
-        new_metadata = {}
-
-        for (
-            filename,
-            title,
-            path,
-            total_words,
-            page_count,
-        ) in document_rows:
-
-            new_metadata[filename] = {
-                "title": title,
-                "path": path,
-                "total_words": total_words,
-                "page_count": page_count,
-            }
-
-        new_inverted_index = {}
-
-        posting_rows = connection.execute(
-            """
-            SELECT
-                term,
-                filename,
-                term_count
-            FROM term_postings
-            """
-        ).fetchall()
-
-        for (
-            term,
-            filename,
-            term_count,
-        ) in posting_rows:
-
-            if term not in new_inverted_index:
-                new_inverted_index[term] = {}
-
-            new_inverted_index[term][
-                filename
-            ] = term_count
-
-        new_filename_index = {}
-
-        filename_rows = connection.execute(
-            """
-            SELECT
-                filename,
-                term
-            FROM filename_terms
-            ORDER BY filename, rowid
-            """
-        ).fetchall()
-
-        for filename, term in filename_rows:
-
-            new_filename_index.setdefault(
-                filename,
-                [],
-            ).append(term)
-
-        new_page_text_index = {}
-
-        page_rows = connection.execute(
-            """
-            SELECT
-                filename,
-                page_number,
-                text
-            FROM pages
-            ORDER BY filename, page_number
-            """
-        ).fetchall()
-
-        for (
-            filename,
-            page_number,
-            text,
-        ) in page_rows:
-
-            new_page_text_index.setdefault(
-                filename,
-                [],
-            ).append({
-                "page": page_number,
-                "text": text,
-            })
-
-        with INDEX_DATA_LOCK:
-
-            REAL_INVERTED_INDEX = (
-                new_inverted_index
-            )
-
-            DOCUMENT_METADATA = (
-                new_metadata
-            )
-
-            FILENAME_INDEX = (
-                new_filename_index
-            )
-
-            PAGE_TEXT_INDEX = (
-                new_page_text_index
-            )
+        publish_index_state(replacement)
 
 
-def get_document_term_counts_from_sqlite(
-    filename,
-):
-    with get_sqlite_connection() as connection:
+def get_document_term_counts_from_sqlite(filename):
+    """Thin adapter over storage.get_document_term_counts_from_sqlite."""
 
-        rows = connection.execute(
-            """
-            SELECT term, term_count
-            FROM term_postings
-            WHERE filename = ?
-            """,
-            (filename,),
-        ).fetchall()
-
-    return dict(rows)
+    return storage.get_document_term_counts_from_sqlite(
+        SQLITE_DB_FILE,
+        filename,
+    )
 
 
-def _remove_document_from_memory(
-    filename,
-    old_term_counts,
-):
+def load_database():
     """
-    Remove one document without rebuilding the corpus.
+    Restore the legacy JSON snapshot files, then publish once.
 
-    Posting-list dictionaries are replaced rather than mutated in-place,
-    so searches already holding a posting list keep a stable object.
+    storage builds the snapshot from the four files, seeded with the
+    current containers so a missing file leaves its container alone.
     """
 
-    for term in old_term_counts:
+    with INDEX_DATA_LOCK:
 
-        posting_list = (
-            REAL_INVERTED_INDEX.get(term)
-        )
-
-        if not posting_list:
-            continue
-
-        new_posting_list = dict(
-            posting_list
-        )
-
-        new_posting_list.pop(
-            filename,
-            None,
-        )
-
-        if new_posting_list:
-            REAL_INVERTED_INDEX[
-                term
-            ] = new_posting_list
-        else:
-            REAL_INVERTED_INDEX.pop(
-                term,
-                None,
+        publish_index_state(
+            storage.load_json_snapshot(
+                index_file=INDEX_FILE,
+                meta_file=META_FILE,
+                filename_index_file=FILENAME_INDEX_FILE,
+                page_text_file=PAGE_TEXT_FILE,
+                current=INDEX_STATE.snapshot(),
             )
-
-    DOCUMENT_METADATA.pop(
-        filename,
-        None,
-    )
-
-    FILENAME_INDEX.pop(
-        filename,
-        None,
-    )
-
-    PAGE_TEXT_INDEX.pop(
-        filename,
-        None,
-    )
+        )
 
 
-def _add_document_to_memory(
-    filename,
-    metadata,
-    filename_words,
-    pages,
-    content_words,
+def save_database_snapshot(
+    inverted_index,
+    document_metadata,
+    filename_index,
+    page_text_index,
 ):
-    DOCUMENT_METADATA[filename] = metadata
+    """Thin adapter over storage.save_database_snapshot."""
 
-    # Filename index is document-local.
-    FILENAME_INDEX[filename] = (
-        filename_words
+    storage.save_database_snapshot(
+        index_file=INDEX_FILE,
+        meta_file=META_FILE,
+        filename_index_file=FILENAME_INDEX_FILE,
+        page_text_file=PAGE_TEXT_FILE,
+        inverted_index=inverted_index,
+        document_metadata=document_metadata,
+        filename_index=filename_index,
+        page_text_index=page_text_index,
     )
 
-    PAGE_TEXT_INDEX[filename] = pages
 
-    # Each changed posting list gets a new dictionary object.
-    term_counts = {}
+def save_database():
+    """
+    Capture one generation under the lock, then write it out.
 
-    for word in content_words:
-        term_counts[word] = (
-            term_counts.get(word, 0) + 1
-        )
+    No call sites: this was already unreachable before the extraction.
+    It is kept because it is part of the persistence API and removing it
+    is a separate decision from relocating it.
+    """
 
-    for term, count in term_counts.items():
+    with INDEX_DATA_LOCK:
 
-        old_postings = REAL_INVERTED_INDEX.get(
-            term,
-            {}
-        )
+        snapshot = INDEX_STATE.snapshot()
 
-        new_postings = dict(
-            old_postings
-        )
+    save_database_snapshot(
+        snapshot["inverted_index"],
+        snapshot["document_metadata"],
+        snapshot["filename_index"],
+        snapshot["page_text_index"],
+    )
 
-        new_postings[filename] = count
 
-        REAL_INVERTED_INDEX[
-            term
-        ] = new_postings
+from search_engine import storage
+
+
+
+
+
+
+
+
+
+
+
 
 
 def incrementally_index_document(
@@ -1528,53 +623,25 @@ def incrementally_index_document(
     not to the number of existing documents.
     """
 
-    text = extract_text(
+    # The rule for turning a document file into indexed parts lives in
+    # the indexing layer, because the rebuild path uses the same rule.
+    # Two copies of it is how an online index and an offline index drift
+    # apart.
+    extracted = indexing.extract_document(
         file_path,
         filename,
     )
 
-    content_words = tokenize(
-        text
-    )
-
-    term_counts = {}
-
-    for word in content_words:
-        term_counts[word] = (
-            term_counts.get(word, 0)
-            + 1
-        )
-
-    pages = extract_pages(
-        file_path,
-        filename,
-    )
-
-    filename_without_extension = (
-        os.path.splitext(filename)[0]
-    )
-
-    filename_words = tokenize_filename(
-        filename_without_extension
-    )
-
-    if not content_words:
+    if extracted is None:
         raise ValueError(
             "Document contains no readable text."
         )
 
-    metadata = {
-        "title": filename,
-        "path": os.path.abspath(
-            file_path
-        ),
-        "total_words": len(
-            content_words
-        ),
-        "page_count": len(
-            pages
-        ),
-    }
+    content_words = extracted["content_words"]
+    term_counts = extracted["term_counts"]
+    filename_words = extracted["filename_words"]
+    pages = extracted["pages"]
+    metadata = extracted["metadata"]
 
     old_term_counts = (
         get_document_term_counts_from_sqlite(
@@ -1582,108 +649,40 @@ def incrementally_index_document(
         )
     )
 
+    # Build the replacement containers without publishing, then swap
+    # once. A concurrent search sees the old generation or the new one,
+    # never a document present in metadata but missing from the filename
+    # index.
     with INDEX_DATA_LOCK:
 
-        _remove_document_from_memory(
-            filename,
-            old_term_counts,
+        publish_index_state(
+            plan_upsert_document(
+                INDEX_STATE.snapshot(),
+                filename,
+                metadata,
+                filename_words,
+                pages,
+                content_words,
+                old_term_counts,
+            )
         )
 
-        _add_document_to_memory(
-            filename,
-            metadata,
-            filename_words,
-            pages,
-            content_words,
-        )
-
-    # Persist only this document and its postings.
+    # Persist only this document and its postings. The statements live
+    # in the storage layer; this function decides when they run and
+    # whether it owns the transaction.
     own_connection = connection is None
 
     if own_connection:
         connection = get_sqlite_connection()
 
     try:
-        connection.execute(
-            "DELETE FROM term_postings WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM filename_terms WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM pages WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM documents WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            """
-            INSERT INTO documents
-            (filename, title, path, total_words, page_count)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                filename,
-                metadata["title"],
-                metadata["path"],
-                metadata["total_words"],
-                metadata["page_count"],
-            ),
-        )
-
-        connection.executemany(
-            """
-            INSERT INTO term_postings
-            (term, filename, term_count)
-            VALUES (?, ?, ?)
-            """,
-            [
-                (
-                    term,
-                    filename,
-                    count,
-                )
-                for term, count in term_counts.items()
-            ],
-        )
-
-        connection.executemany(
-            """
-            INSERT OR IGNORE INTO filename_terms
-            (filename, term)
-            VALUES (?, ?)
-            """,
-            [
-                (
-                    filename,
-                    term,
-                )
-                for term in set(filename_words)
-            ],
-        )
-
-        connection.executemany(
-            """
-            INSERT INTO pages
-            (filename, page_number, text)
-            VALUES (?, ?, ?)
-            """,
-            [
-                (
-                    filename,
-                    page_data["page"],
-                    page_data["text"],
-                )
-                for page_data in pages
-            ],
+        storage.replace_document_rows(
+            connection,
+            filename=filename,
+            metadata=metadata,
+            term_counts=term_counts,
+            filename_words=filename_words,
+            pages=pages,
         )
 
         if commit:
@@ -1713,9 +712,12 @@ def incrementally_remove_document(
 
     with INDEX_DATA_LOCK:
 
-        _remove_document_from_memory(
-            filename,
-            old_term_counts,
+        publish_index_state(
+            plan_remove_document(
+                INDEX_STATE.snapshot(),
+                filename,
+                old_term_counts,
+            )
         )
 
     own_connection = connection is None
@@ -1724,24 +726,9 @@ def incrementally_remove_document(
         connection = get_sqlite_connection()
 
     try:
-        connection.execute(
-            "DELETE FROM term_postings WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM filename_terms WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM pages WHERE filename = ?",
-            (filename,),
-        )
-
-        connection.execute(
-            "DELETE FROM documents WHERE filename = ?",
-            (filename,),
+        storage.delete_document_rows(
+            connection,
+            filename=filename,
         )
 
         if commit:
@@ -1763,162 +750,34 @@ def queue_index_refresh():
     return False
 
 
-def load_database():
-
-    global REAL_INVERTED_INDEX
-    global DOCUMENT_METADATA
-    global FILENAME_INDEX
-    global PAGE_TEXT_INDEX
-
-    if os.path.exists(INDEX_FILE):
-
-        try:
-
-            with open(
-                INDEX_FILE,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                REAL_INVERTED_INDEX = json.load(
-                    file
-                )
-
-        except Exception as error:
-
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"content index: {error}"
-            )
-
-            REAL_INVERTED_INDEX = {}
-
-    if os.path.exists(META_FILE):
-
-        try:
-
-            with open(
-                META_FILE,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                DOCUMENT_METADATA = json.load(
-                    file
-                )
-
-        except Exception as error:
-
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"metadata: {error}"
-            )
-
-            DOCUMENT_METADATA = {}
-
-    if os.path.exists(FILENAME_INDEX_FILE):
-
-        try:
-
-            with open(
-                FILENAME_INDEX_FILE,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                FILENAME_INDEX = json.load(
-                    file
-                )
-
-        except Exception as error:
-
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"filename index: {error}"
-            )
-
-            FILENAME_INDEX = {}
-
-    if os.path.exists(PAGE_TEXT_FILE):
-
-        try:
-
-            with open(
-                PAGE_TEXT_FILE,
-                "r",
-                encoding="utf-8"
-            ) as file:
-
-                PAGE_TEXT_INDEX = json.load(
-                    file
-                )
-
-        except Exception as error:
-
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"page text index: {error}"
-            )
-
-            PAGE_TEXT_INDEX = {}
 
 
 # ============================================================
 # DATABASE SAVE
 # ============================================================
 
-def atomic_write_json(path, data):
-    temp_path = path + ".tmp"
-
-    with open(
-        temp_path,
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(data, file, indent=2)
-        file.flush()
-        os.fsync(file.fileno())
-
-    os.replace(temp_path, path)
 
 
-def save_database_snapshot(
-    inverted_index,
-    document_metadata,
-    filename_index,
-    page_text_index,
-):
-    atomic_write_json(
-        INDEX_FILE,
-        inverted_index,
-    )
-
-    atomic_write_json(
-        META_FILE,
-        document_metadata,
-    )
-
-    atomic_write_json(
-        FILENAME_INDEX_FILE,
-        filename_index,
-    )
-
-    atomic_write_json(
-        PAGE_TEXT_FILE,
-        page_text_index,
-    )
 
 
-def save_database():
-    with INDEX_DATA_LOCK:
-        snapshot = (
-            REAL_INVERTED_INDEX,
-            DOCUMENT_METADATA,
-            FILENAME_INDEX,
-            PAGE_TEXT_INDEX,
-        )
 
-    save_database_snapshot(*snapshot)
+
+# ============================================================
+# REBUILD AND PATH ADAPTERS
+# ============================================================
+#
+# The build now lives in search_engine/indexing.py and returns a
+# snapshot. This adapter keeps the ordering, which is the part that
+# belongs to the application:
+#
+#     build -> save JSON snapshot -> publish -> sync SQLite
+#
+# That order is the one that shipped before the extraction. An earlier
+# design note assumed sync-then-publish. The difference matters: a crash
+# between the two leaves either a saved snapshot with an old live index,
+# or a live index with an unsaved snapshot, and only one of those is
+# recoverable.
+
 
 def rebuild_database():
     """
@@ -1929,111 +788,14 @@ def rebuild_database():
     index dictionaries are swapped together.
     """
 
-    print()
-    print("==============================================")
-    print("REBUILDING SEARCH DATABASE")
-    print("==============================================")
-
-    new_inverted_index = {}
-    new_document_metadata = {}
-    new_filename_index = {}
-    new_page_text_index = {}
-
-    supported_extensions = (
-        ".pdf",
-        ".docx",
-        ".txt",
+    new_snapshot = indexing.build_index_from_folder(
+        DATA_FOLDER
     )
 
-    for filename in os.listdir(DATA_FOLDER):
-
-        if not filename.lower().endswith(
-            supported_extensions
-        ):
-            continue
-
-        file_path = os.path.join(
-            DATA_FOLDER,
-            filename,
-        )
-
-        print(
-            f"[REBUILD] Indexing: {filename}"
-        )
-
-        try:
-            text = extract_text(
-                file_path,
-                filename,
-            )
-
-            content_words = tokenize(text)
-
-            filename_without_extension = (
-                os.path.splitext(filename)[0]
-            )
-
-            filename_words = tokenize_filename(
-                filename_without_extension
-            )
-
-            pages = extract_pages(
-                file_path,
-                filename,
-            )
-
-            if not content_words:
-                print(
-                    "[REBUILD] Skipped empty document: "
-                    f"{filename}"
-                )
-                continue
-
-            new_document_metadata[filename] = {
-                "title": filename,
-                "path": os.path.abspath(file_path),
-                "total_words": len(content_words),
-                "page_count": len(pages),
-            }
-
-            new_filename_index[
-                filename
-            ] = filename_words
-
-            new_page_text_index[
-                filename
-            ] = pages
-
-            for word in content_words:
-
-                if word not in new_inverted_index:
-                    new_inverted_index[word] = {}
-
-                if (
-                    filename
-                    not in new_inverted_index[word]
-                ):
-                    new_inverted_index[word][filename] = 0
-
-                new_inverted_index[word][filename] += 1
-
-        except Exception as error:
-
-            print(
-                f"[REBUILD ERROR] Could not index "
-                f"{filename}: {error}"
-            )
-
-            continue
-
-    print()
-    print(
-        "[REBUILD] New snapshot complete: "
-        f"{len(new_document_metadata)} documents, "
-        f"{len(new_inverted_index)} content terms, "
-        f"{len(new_filename_index)} filenames indexed, "
-        f"{len(new_page_text_index)} page-text entries"
-    )
+    new_inverted_index = new_snapshot["inverted_index"]
+    new_document_metadata = new_snapshot["document_metadata"]
+    new_filename_index = new_snapshot["filename_index"]
+    new_page_text_index = new_snapshot["page_text_index"]
 
     # Write the full new snapshot first.
     save_database_snapshot(
@@ -2043,17 +805,19 @@ def rebuild_database():
         new_page_text_index,
     )
 
-    global REAL_INVERTED_INDEX
-    global DOCUMENT_METADATA
-    global FILENAME_INDEX
-    global PAGE_TEXT_INDEX
-
     # One pointer swap: searches see old or new, never a partial build.
+    # The globals are re-pointed inside the same critical section,
+    # because execute_search captures all four of them under this lock.
+    # Re-pointing them after releasing it would let a reader capture a
+    # half-rebound set - one global from the new generation and one from
+    # the old.
     with INDEX_DATA_LOCK:
-        REAL_INVERTED_INDEX = new_inverted_index
-        DOCUMENT_METADATA = new_document_metadata
-        FILENAME_INDEX = new_filename_index
-        PAGE_TEXT_INDEX = new_page_text_index
+        publish_index_state({
+            "inverted_index": new_inverted_index,
+            "document_metadata": new_document_metadata,
+            "filename_index": new_filename_index,
+            "page_text_index": new_page_text_index,
+        })
 
     print(
         "[REBUILD] Active snapshot swapped atomically."
@@ -2074,6 +838,23 @@ def rebuild_database():
 
     print("==============================================")
     print()
+
+
+def resolve_document_path(filename):
+    """
+    Thin adapter: the data folder is the application's.
+
+    The guard itself lives beside the code that owns document layout.
+    """
+
+    return indexing.resolve_document_path(
+        DATA_FOLDER,
+        filename,
+    )
+
+
+from search_engine import indexing
+
 load_database()
 initialize_sqlite_store()
 
@@ -2277,75 +1058,17 @@ def upload_file():
     }), 200
 
 
-def build_paginated_response(
-    results,
-    page,
-    limit,
-):
-    """
-    Return a stable paginated search response.
-
-    Ranking happens before this helper. This function only slices
-    the ranked result list and returns pagination metadata.
-    """
-
-    total = len(results)
-
-    total_pages = (
-        (total + limit - 1) // limit
-        if total > 0
-        else 0
-    )
-
-    if total_pages > 0:
-        page = max(
-            1,
-            min(page, total_pages)
-        )
-    else:
-        page = max(1, page)
-
-    start_index = (
-        (page - 1) * limit
-        if total_pages > 0
-        else 0
-    )
-
-    end_index = (
-        start_index + limit
-    )
-
-    page_results = results[
-        start_index:end_index
-    ]
-
-    return jsonify({
-        "results": page_results,
-        "pagination": {
-            "page": page,
-            "limit": limit,
-            "total": total,
-            "total_pages": total_pages,
-            "has_next":
-                page < total_pages,
-            "has_previous":
-                page > 1
-                and total_pages > 0,
-            "start":
-                (
-                    start_index + 1
-                    if page_results
-                    else 0
-                ),
-            "end":
-                (
-                    start_index
-                    + len(page_results)
-                    if page_results
-                    else 0
-                ),
-        },
-    })
+# ============================================================
+# SEARCH ADAPTER
+# ============================================================
+#
+# The ranking pipeline now lives in search_engine/engine.py. What is
+# left here is the transport: parse the query string, take one coherent
+# snapshot under the lock, call the engine, serialise the result.
+#
+# Nothing in this function may grow ranking, scoring or filtering
+# logic. The offline backend has to run the identical pipeline, so any
+# rule written here is a rule the two modes can drift apart on.
 
 
 @app.route(
@@ -2353,1413 +1076,53 @@ def build_paginated_response(
     methods=["GET"]
 )
 def execute_search():
+    """
+    Thin adapter over search_engine.engine.search_index.
+    """
 
-    raw_query = request.args.get(
+    raw_query_text = request.args.get(
         "q",
         ""
-    ).strip()
-
-    if not raw_query:
-        return jsonify({
-            "results": [],
-            "pagination": {
-                "page": 1,
-                "limit": 10,
-                "total": 0,
-                "total_pages": 0,
-                "has_next": False,
-                "has_previous": False
-            }
-        })
-
-    try:
-        requested_page = int(request.args.get("page", "1"))
-    except (TypeError, ValueError):
-        requested_page = 1
-
-    try:
-        requested_limit = int(request.args.get("limit", "10"))
-    except (TypeError, ValueError):
-        requested_limit = 10
-
-    requested_result_page = max(
-        1,
-        requested_page
     )
 
-    limit = min(
-        50,
-        max(1, requested_limit)
+    page_text = request.args.get(
+        "page",
+        "1"
     )
 
-    # Capture one coherent active snapshot for this request.
+    limit_text = request.args.get(
+        "limit",
+        "10"
+    )
+
+    # The engine receives one coherent generation. Capturing all four
+    # under the lock is what stops a request seeing, say, the new
+    # metadata with the previous postings.
     with INDEX_DATA_LOCK:
         active_inverted_index = REAL_INVERTED_INDEX
         active_document_metadata = DOCUMENT_METADATA
         active_filename_index = FILENAME_INDEX
         active_page_text_index = PAGE_TEXT_INDEX
 
-    # Normalize document extensions before tokenization.
-    # Examples:
-    #   BCS502 Module 2.pdf
-    #   "BCS502 Module 2.pdf"
-    # become:
-    #   BCS502 Module 2
-    #   "BCS502 Module 2"
-    keyword_query, filetype_filter = parse_filetype_filter(
-        raw_query
-    )
-
-    normalized_query_text = normalize_search_query(
-        keyword_query
-    )
-
-    query = normalized_query_text.lower()
-
-    quoted_phrase = None
-
-    if (
-        len(query) >= 2
-        and query.startswith('"')
-        and query.endswith('"')
-    ):
-
-        quoted_phrase = query[
-            1:-1
-        ].strip()
-
-    search_words = tokenize_filename(
-        query
-    )
-
-    if (
-        not search_words
-        and
-        not filetype_filter
-    ):
-        return build_paginated_response(
-            [],
-            requested_result_page,
-            limit
-        )
-
-    # Keep numeric tokens searchable. A query such as "999" must be
-    # able to match an indexed token containing 999. The tokenizer already
-    # preserves numeric tokens; removing them here made them unreachable
-    # from the content index.
-    content_query_words = [
-        word
-        for word in search_words
-        if len(word) > 1
-    ]
-
-    # --------------------------------------------------------
-    # FILE-TYPE-ONLY QUERY
-    # --------------------------------------------------------
-    #
-    # A query such as "pdf" is a filter/browse operation.
-    # It must never enter the normal keyword ranking pipeline.
-    # --------------------------------------------------------
-
-    if filetype_filter and not search_words:
-
-        filtered_results = []
-
-        for filename, metadata in active_document_metadata.items():
-
-            extension = os.path.splitext(
-                filename
-            )[1].lower().lstrip(".")
-
-            if extension != filetype_filter:
-                continue
-
-            document_url = (
-                "/api/documents/"
-                +
-                quote(
-                    filename,
-                    safe=""
-                )
-            )
-
-            filtered_results.append({
-
-                "title":
-                    metadata["title"],
-
-                "path":
-                    metadata["path"],
-
-                "document_url":
-                    document_url,
-
-                "page_url":
-                    document_url,
-
-                "open_url":
-                    document_url,
-
-                "snippet":
-                    (
-                        f"Filtered by file type: "
-                        f"{filetype_filter.upper()}"
-                    ),
-
-                "page":
-                    None,
-
-                "highlights":
-                    [],
-
-                "filename_score":
-                    0.0,
-
-                "content_score":
-                    0.0,
-
-                "phrase_score":
-                    0.0,
-
-                "phrase_occurrences":
-                    0,
-
-                "score":
-                    1.0,
-
-                "relevance_score":
-                    1.0,
-
-                "match_type":
-                    (
-                        f"File Type: "
-                        f"{filetype_filter.upper()}"
-                    ),
-
-                "filetype_filter":
-                    filetype_filter,
-
-                "tag":
-                    "Filtered Result"
-
-            })
-
-        filtered_results.sort(
-            key=lambda item:
-                item["title"].lower()
-        )
-
-        return build_paginated_response(
-            filtered_results,
-            requested_result_page,
-            limit
-        )
-
-    normalized_query = " ".join(
-        search_words
-    )
-
-    if quoted_phrase:
-
-        phrase_words = tokenize_filename(
-            quoted_phrase
-        )
-
-    else:
-
-        phrase_words = list(
-            search_words
-        )
-
-    normalized_phrase = " ".join(
-        phrase_words
-    )
-
-    phrase_query = (
-        len(phrase_words) >= 2
-    )
-
-    if not search_words:
-        phrase_query = False
-
-    if filetype_filter:
-
-        total_documents = sum(
-            1
-            for filename in active_document_metadata
-            if os.path.splitext(filename)[1]
-            .lower()
-            .lstrip(".")
-            == filetype_filter
-        )
-
-    else:
-
-        total_documents = len(
-            active_document_metadata
-        )
-
-    if total_documents == 0:
-        return jsonify([])
-
-    # --------------------------------------------------------
-    # SCORE STORAGE
-    # --------------------------------------------------------
-
-    document_scores = {}
-
-    for filename in active_document_metadata:
-
-        document_scores[filename] = {
-
-            "filename_score": 0.0,
-
-            "content_score": 0.0,
-
-            "phrase_score": 0.0,
-
-            "phrase_occurrences": 0,
-
-            "filename_matches": [],
-
-            "content_matches": [],
-
-            "phrase_match": False,
-
-            # Explicit content-match hierarchy.
-            "exact_content_match": False,
-
-            "best_prefix_similarity": 0.0,
-
-            "best_numeric_similarity": 0.0
-
-        }
-
-    def filetype_allowed(filename):
-
-        if not filetype_filter:
-            return True
-
-        extension = os.path.splitext(
-            filename
-        )[1].lower().lstrip(".")
-
-        return extension == filetype_filter
-
-    # --------------------------------------------------------
-    # FILENAME SEARCH
-    # --------------------------------------------------------
-
-    for filename, filename_words in (
-        active_filename_index.items()
-    ):
-
-        if not filetype_allowed(filename):
-            continue
-
-        normalized_filename = " ".join(
-            filename_words
-        )
-
-        if (
-            normalized_query
-            ==
-            normalized_filename
-        ):
-
-            document_scores[
-                filename
-            ]["filename_score"] += 100.0
-
-        elif (
-            len(search_words) >= 2
-            and
-            normalized_query
-            in normalized_filename
-        ):
-
-            document_scores[
-                filename
-            ]["filename_score"] += 50.0
-
-        if (
-            quoted_phrase
-            and
-            normalized_phrase
-            and
-            normalized_phrase
-            in normalized_filename
-        ):
-
-            document_scores[
-                filename
-            ]["phrase_score"] += 30.0
-
-            document_scores[
-                filename
-            ]["phrase_match"] = True
-
-        for word in search_words:
-
-            if word not in filename_words:
-                continue
-
-            if word.isdigit():
-
-                non_numeric_query_words = [
-                    query_word
-                    for query_word in search_words
-                    if not query_word.isdigit()
-                ]
-
-                has_related_filename_word = any(
-                    query_word in filename_words
-                    for query_word
-                    in non_numeric_query_words
-                )
-
-                if (
-                    non_numeric_query_words
-                    and
-                    not has_related_filename_word
-                ):
-
-                    continue
-
-            document_scores[
-                filename
-            ]["filename_score"] += 20.0
-
-            if word not in document_scores[
-                filename
-            ]["filename_matches"]:
-
-                document_scores[
-                    filename
-                ]["filename_matches"].append(
-                    word
-                )
-
-    # --------------------------------------------------------
-    # CONTENT TF-IDF
-    # --------------------------------------------------------
-
-    # Content matching levels:
-    #
-    # 1. Exact token:
-    #       999 -> 999
-    #
-    # 2. Prefix token:
-    #       replacementuni -> replacementunique999
-    #
-    # 3. Numeric substring:
-    #       999 -> replacementunique999
-    #
-    # Numeric substring matching is deliberately explicit because users
-    # commonly search for a numeric fragment embedded in an alphanumeric
-    # identifier/code. Exact matches remain strongest, prefix matches are
-    # next, and numeric-substring matches receive a lower lexical weight.
-
-    indexed_terms = list(
-        active_inverted_index.keys()
-    )
-
-    for word in content_query_words:
-
-        matching_terms = []
-
-        # ----------------------------------------------------
-        # EXACT TOKEN
-        # ----------------------------------------------------
-        if word in active_inverted_index:
-
-            matching_terms.append(
-                (
-                    word,
-                    1.0
-                )
-            )
-
-        # ----------------------------------------------------
-        # PREFIX TOKEN
-        # ----------------------------------------------------
-        if len(word) >= 3:
-
-            for term in indexed_terms:
-
-                if term == word:
-                    continue
-
-                if not term.startswith(word):
-                    continue
-
-                if not term:
-                    continue
-
-                prefix_similarity = (
-                    len(word)
-                    /
-                    float(len(term))
-                )
-
-                prefix_similarity = min(
-                    0.90,
-                    max(
-                        0.25,
-                        prefix_similarity
-                    )
-                )
-
-                matching_terms.append(
-                    (
-                        term,
-                        prefix_similarity
-                    )
-                )
-
-        # ----------------------------------------------------
-        # NUMERIC SUBSTRING
-        # ----------------------------------------------------
-        if word.isdigit() and len(word) >= 2:
-
-            for term in indexed_terms:
-
-                if term == word:
-                    continue
-
-                if word not in term:
-                    continue
-
-                # Prefix matches already have a stronger lexical
-                # interpretation, so do not add a weaker duplicate.
-                if term.startswith(word):
-                    continue
-
-                substring_similarity = (
-                    len(word)
-                    /
-                    float(len(term))
-                )
-
-                substring_similarity = min(
-                    0.65,
-                    max(
-                        0.20,
-                        substring_similarity * 0.70
-                    )
-                )
-
-                matching_terms.append(
-                    (
-                        term,
-                        substring_similarity
-                    )
-                )
-
-        # Keep the strongest matching interpretation for each indexed term.
-        best_term_weights = {}
-
-        for (
-            term,
-            match_weight
-        ) in matching_terms:
-
-            current_weight = (
-                best_term_weights.get(
-                    term,
-                    0.0
-                )
-            )
-
-            if match_weight > current_weight:
-
-                best_term_weights[
-                    term
-                ] = match_weight
-
-        for (
-            term,
-            match_weight
-        ) in best_term_weights.items():
-
-            docs_containing_word = len(
-                active_inverted_index[term]
-            )
-
-            if docs_containing_word == 0:
-                continue
-
-            idf = math.log(
-                (total_documents + 1)
-                /
-                (docs_containing_word + 1)
-            ) + 1
-
-            for (
-                filename,
-                term_count
-            ) in active_inverted_index[term].items():
-
-                if not filetype_allowed(filename):
-                    continue
-
-                if filename not in active_document_metadata:
-                    continue
-
-                total_words = active_document_metadata[
-                    filename
-                ]["total_words"]
-
-                if total_words == 0:
-                    continue
-
-                tf = (
-                    term_count
-                    /
-                    float(total_words)
-                )
-
-                tfidf = (
-                    tf
-                    *
-                    idf
-                    *
-                    match_weight
-                )
-
-                document_scores[
-                    filename
-                ]["content_score"] += tfidf
-
-                # --------------------------------------------
-                # Explicit lexical match hierarchy
-                # --------------------------------------------
-                #
-                # Exact indexed token:
-                #     999 -> 999
-                #
-                # Prefix:
-                #     replacementuni -> replacementunique999
-                #
-                # Numeric substring:
-                #     999 -> replacementunique999
-                #
-                # Keep these signals separate from TF-IDF so the
-                # final ranking does not lose lexical intent merely
-                # because one document contains a term frequently.
-                if term == word:
-                    document_scores[
-                        filename
-                    ]["exact_content_match"] = True
-
-                elif word.isdigit() and word in term:
-                    document_scores[
-                        filename
-                    ]["best_numeric_similarity"] = max(
-                        document_scores[
-                            filename
-                        ]["best_numeric_similarity"],
-                        match_weight
-                    )
-
-                elif term.startswith(word):
-                    document_scores[
-                        filename
-                    ]["best_prefix_similarity"] = max(
-                        document_scores[
-                            filename
-                        ]["best_prefix_similarity"],
-                        match_weight
-                    )
-
-                if word not in document_scores[
-                    filename
-                ]["content_matches"]:
-
-                    document_scores[
-                        filename
-                    ]["content_matches"].append(
-                        word
-                    )
-
-# --------------------------------------------------------
-    # PHRASE SEARCH
-    # --------------------------------------------------------
-
-    if phrase_query:
-
-        for filename in active_document_metadata:
-
-            if not filetype_allowed(filename):
-                continue
-
-            pages = active_page_text_index.get(
-                filename,
-                []
-            )
-
-            normalized_page_text = " ".join(
-                page["text"]
-                for page in pages
-            ).lower()
-
-            # ------------------------------------------------
-            # Count exact phrase occurrences in document text.
-            # Repeated exact phrases receive increasing but
-            # capped phrase relevance.
-            # ------------------------------------------------
-
-            phrase_occurrences = count_phrase_occurrences(
-                normalized_page_text,
-                normalized_phrase
-            )
-
-            if phrase_occurrences > 0:
-
-                document_scores[
-                    filename
-                ]["phrase_occurrences"] = (
-                    phrase_occurrences
-                )
-
-                # Exact phrase frequency uses a logarithmic
-                # curve. More exact occurrences increase
-                # relevance, but with diminishing returns.
-                #
-                # Reference points:
-                #   1 occurrence  -> 50.0
-                #   2 occurrences -> ~57.5
-                #   7 occurrences -> ~80.4
-                #   16 occurrences -> ~93.1
-                #   25 occurrences -> 100.0
-                #
-                # This is deliberately capped at 100 so phrase
-                # repetition cannot overwhelm the other signals.
-
-                max_frequency_reference = 25.0
-
-                if phrase_occurrences <= 1:
-
-                    content_phrase_score = 50.0
-
-                else:
-
-                    frequency_ratio = min(
-                        math.log(
-                            phrase_occurrences
-                        )
-                        /
-                        math.log(
-                            max_frequency_reference
-                        ),
-                        1.0
-                    )
-
-                    content_phrase_score = (
-                        50.0
-                        +
-                        (
-                            50.0
-                            *
-                            frequency_ratio
-                        )
-                    )
-
-                content_phrase_score = min(
-                    content_phrase_score,
-                    100.0
-                )
-
-                document_scores[
-                    filename
-                ]["phrase_score"] = max(
-                    document_scores[
-                        filename
-                    ]["phrase_score"],
-                    content_phrase_score
-                )
-
-                document_scores[
-                    filename
-                ]["phrase_match"] = True
-
-            filename_words = active_filename_index.get(
-                filename,
-                []
-            )
-
-            normalized_filename = " ".join(
-                filename_words
-            )
-
-            # Exact phrase inside the filename is a separate,
-            # stronger filename signal.
-            if (
-                normalized_phrase
-                and
-                normalized_phrase
-                in normalized_filename
-            ):
-
-                document_scores[
-                    filename
-                ]["phrase_score"] += 100.0
-
-                document_scores[
-                    filename
-                ]["phrase_match"] = True
-
-    # --------------------------------------------------------
-    # Explicit quoted phrase filter
-    # --------------------------------------------------------
-
-    if quoted_phrase:
-
-        phrase_documents = {
-            filename
-            for filename, scores
-            in document_scores.items()
-            if scores["phrase_match"]
-        }
-
-        if phrase_documents:
-
-            for filename in list(
-                document_scores.keys()
-            ):
-
-                if filename not in phrase_documents:
-
-                    document_scores.pop(
-                        filename
-                    )
-
-        else:
-
-            return jsonify([])
-
-    # --------------------------------------------------------
-    # Strongest content score
-    # --------------------------------------------------------
-
-    max_content_score = max(
-
-        (
-            scores["content_score"]
-            for scores
-            in document_scores.values()
-        ),
-
-        default=0.0
-    )
-
-    query_has_filename_signal = any(
-
-        scores["filename_score"] > 0
-
-        for scores
-        in document_scores.values()
-
-    )
-
-    # --------------------------------------------------------
-    # FINAL RANKING
-    # --------------------------------------------------------
-
-    if filetype_filter:
-
-        document_scores = {
-            filename: scores
-            for filename, scores
-            in document_scores.items()
-            if filetype_allowed(filename)
-        }
-
-        if not document_scores:
-            return jsonify([])
-
-        max_content_score = max(
-            (
-                scores["content_score"]
-                for scores
-                in document_scores.values()
-            ),
-            default=0.0
-        )
-
-    ranked_documents = []
-
-    for filename, scores in (
-        document_scores.items()
-    ):
-
-        filename_score = scores[
-            "filename_score"
-        ]
-
-        content_score = scores[
-            "content_score"
-        ]
-
-        phrase_score = scores[
-            "phrase_score"
-        ]
-
-        exact_content_match = bool(
-            scores.get(
-                "exact_content_match",
-                False
-            )
-        )
-
-        best_prefix_similarity = float(
-            scores.get(
-                "best_prefix_similarity",
-                0.0
-            )
-        )
-
-        best_numeric_similarity = float(
-            scores.get(
-                "best_numeric_similarity",
-                0.0
-            )
-        )
-
-        # Explicit lexical hierarchy:
-        #
-        # 1. exact content token
-        # 2. strongest prefix completion
-        # 3. numeric substring
-        # 4. general TF-IDF
-        #
-        # The lexical signal is deliberately bounded so it improves
-        # ranking without allowing a weak lexical match to overwhelm
-        # filename/phrase relevance.
-        if exact_content_match:
-            lexical_match_relevance = 1.00
-        elif best_prefix_similarity > 0:
-            lexical_match_relevance = (
-                0.70
-                +
-                (0.30 * best_prefix_similarity)
-            )
-        elif best_numeric_similarity > 0:
-            lexical_match_relevance = (
-                0.30
-                +
-                (0.40 * best_numeric_similarity)
-            )
-        else:
-            lexical_match_relevance = 0.0
-
-        filename_words = active_filename_index.get(
-            filename,
-            []
-        )
-
-        normalized_filename = " ".join(
-            filename_words
-        )
-
-        matched_word_count = sum(
-            1
-            for word in search_words
-            if word in filename_words
-        )
-
-        if search_words:
-
-            query_word_coverage = (
-                matched_word_count
-                /
-                len(search_words)
-            )
-
-        else:
-
-            query_word_coverage = 0.0
-
-        if (
-            normalized_query
-            ==
-            normalized_filename
-        ):
-
-            filename_relevance = 1.0
-
-        elif (
-            len(search_words) >= 2
-            and
-            normalized_query
-            in normalized_filename
-        ):
-
-            filename_relevance = 0.95
-
-        elif query_word_coverage > 0:
-
-            filename_relevance = (
-                0.75
-                *
-                query_word_coverage
-            )
-
-        else:
-
-            filename_relevance = 0.0
-
-        if max_content_score > 0:
-
-            content_relevance = (
-                content_score
-                /
-                max_content_score
-            )
-
-        else:
-
-            content_relevance = 0.0
-
-        phrase_relevance = min(
-            phrase_score / 100.0,
-            1.0
-        )
-
-        if (
-            filetype_filter
-            and
-            not search_words
-        ):
-
-            # Type-only query: this is a filtered document list.
-            final_score = 0.75
-
-        else:
-
-            if quoted_phrase and query_has_filename_signal:
-
-                # Exact quoted document-title search.
-                # All weights sum to 1.00.
-                filename_weight = 0.80
-                content_weight = 0.05
-                phrase_weight = 0.15
-                lexical_weight = 0.0
-
-            elif quoted_phrase:
-
-                # Exact quoted content phrase.
-                # All weights sum to 1.00.
-                filename_weight = 0.05
-                content_weight = 0.15
-                phrase_weight = 0.80
-                lexical_weight = 0.0
-
-            elif query_has_filename_signal:
-
-                # Filename/title-oriented search.
-                # All weights sum to 1.00.
-                filename_weight = 0.75
-                content_weight = 0.15
-                phrase_weight = 0.10
-                lexical_weight = 0.0
-
-            else:
-
-                # Normal topic/content search.
-                # Preserve the original ranking signals while giving
-                # explicit lexical intent its own bounded contribution.
-                filename_weight = 0.05
-                content_weight = 0.60
-                phrase_weight = 0.20
-                lexical_weight = 0.15
-
-            final_score = (
-
-                (
-                    filename_relevance
-                    *
-                    filename_weight
-                )
-
-                +
-
-                (
-                    content_relevance
-                    *
-                    content_weight
-                )
-
-                +
-
-                (
-                    phrase_relevance
-                    *
-                    phrase_weight
-                )
-
-                +
-
-                (
-                    lexical_match_relevance
-                    *
-                    lexical_weight
-                )
-            )
-
-        if (
-            filename_score == 0
-            and
-            content_score == 0
-            and
-            phrase_score == 0
-        ):
-            continue
-
-        if final_score <= 0:
-            continue
-
-        ranked_documents.append({
-
-            "filename":
-                filename,
-
-            "filename_score":
-                filename_score,
-
-            "content_score":
-                content_score,
-
-            "phrase_score":
-                phrase_score,
-
-            "phrase_occurrences":
-                scores[
-                    "phrase_occurrences"
-                ],
-
-            "final_score":
-                final_score,
-
-            "filename_matches":
-                scores[
-                    "filename_matches"
-                ],
-
-            "content_matches":
-                scores[
-                    "content_matches"
-                ],
-
-            "phrase_match":
-                scores[
-                    "phrase_match"
-                ],
-
-            "exact_content_match":
-                exact_content_match,
-
-            "prefix_similarity":
-                best_prefix_similarity,
-
-            "numeric_similarity":
-                best_numeric_similarity,
-
-            "lexical_match_relevance":
-                lexical_match_relevance
-
-        })
-
-    if (
-        filetype_filter
-        and
-        not search_words
-    ):
-
-        ranked_documents.sort(
-            key=lambda item:
-                item["filename"].lower()
-        )
-
-    else:
-
-        ranked_documents.sort(
-            key=lambda item:
-                item["final_score"],
-            reverse=True
-        )
-
-    # --------------------------------------------------------
-    # BUILD RESPONSE
-    # --------------------------------------------------------
-
-    results = []
-
-    for item in ranked_documents:
-
-        filename = item[
-            "filename"
-        ]
-
-        metadata = active_document_metadata[
-            filename
-        ]
-
-        filename_matches = item[
-            "filename_matches"
-        ]
-
-        content_matches = item[
-            "content_matches"
-        ]
-
-        phrase_match = item[
-            "phrase_match"
-        ]
-
-        if (
-            filetype_filter
-            and
-            not search_words
-        ):
-
-            match_type = (
-                f"File Type: "
-                f"{filetype_filter.upper()}"
-            )
-
-        elif (
-            filename_matches
-            and
-            phrase_match
-        ):
-
-            match_type = (
-                "Filename + Phrase"
-            )
-
-        elif phrase_match:
-
-            match_type = "Phrase Match"
-
-        elif (
-            filename_matches
-            and
-            content_matches
-        ):
-
-            match_type = (
-                "Filename + Content"
-            )
-
-        elif filename_matches:
-
-            match_type = "Filename Match"
-
-        else:
-
-            match_type = "Content Match"
-
-        if (
-            filetype_filter
-            and
-            not search_words
-        ):
-
-            snippet = (
-                f"Filtered by file type: "
-                f"{filetype_filter.upper()}"
-            )
-
-            document_page = None
-            highlights = []
-
-        elif content_matches:
-
-            snippet_words = (
-                phrase_words
-                if phrase_match
-                else content_matches
-            )
-
-            snippet_info = get_snippet_and_page(
-                filename,
-                snippet_words
-            )
-
-            snippet = snippet_info[
-                "snippet"
-            ]
-
-            document_page = snippet_info[
-                "page"
-            ]
-
-            highlights = snippet_info[
-                "highlights"
-            ]
-
-        else:
-
-            snippet = (
-                "Filename matched: "
-                +
-                ", ".join(
-                    filename_matches
-                )
-            )
-
-            document_page = None
-            highlights = []
-
-        document_url = (
-            "/api/documents/"
-            + quote(
-                filename,
-                safe=""
-            )
-        )
-
-        if document_page is not None:
-            page_url = (
-                document_url
-                + f"#page={document_page}"
-            )
-        else:
-            page_url = document_url
-
-        results.append({
-
-            "title":
-                metadata["title"],
-
-            "path":
-                metadata["path"],
-
-            "document_url":
-                document_url,
-
-            "page_url":
-                page_url,
-
-            "snippet":
-                snippet,
-
-            "page":
-                document_page,
-
-            "highlights":
-                highlights,
-
-            "phrase_occurrences":
-                item["phrase_occurrences"],
-
-            "filename_score":
-                round(
-                    item["filename_score"],
-                    4
-                ),
-
-            "content_score":
-                round(
-                    item["content_score"],
-                    4
-                ),
-
-            "exact_content_match":
-                item.get(
-                    "exact_content_match",
-                    False
-                ),
-
-            "prefix_similarity":
-                round(
-                    item.get(
-                        "prefix_similarity",
-                        0.0
-                    ),
-                    4
-                ),
-
-            "numeric_similarity":
-                round(
-                    item.get(
-                        "numeric_similarity",
-                        0.0
-                    ),
-                    4
-                ),
-
-            "lexical_match_relevance":
-                round(
-                    item.get(
-                        "lexical_match_relevance",
-                        0.0
-                    ),
-                    4
-                ),
-
-            "phrase_score":
-                round(
-                    item["phrase_score"],
-                    4
-                ),
-
-            "score":
-                round(
-                    item["final_score"],
-                    4
-                ),
-
-            "match_type":
-                match_type,
-
-            "filetype_filter":
-                filetype_filter,
-
-            "tag":
-                "Ranked Result",
-
-            "open_url":
-                page_url
-
-        })
-
-    return build_paginated_response(
-        results,
-        requested_result_page,
-        limit
-    )
-
-
-def resolve_document_path(filename):
-    """
-    Resolve an indexed document to a real path inside DATA_FOLDER.
-
-    Prevents GET/DELETE document paths from escaping DATA_FOLDER.
-    """
-
-    if not filename:
-        return None
-
-    data_root = os.path.realpath(DATA_FOLDER)
-
-    requested_path = os.path.realpath(
-        os.path.join(
-            DATA_FOLDER,
-            os.path.basename(filename)
+    return jsonify(
+        search_index(
+            raw_query_text,
+            page_text,
+            limit_text,
+            active_inverted_index,
+            active_document_metadata,
+            active_filename_index,
+            active_page_text_index,
         )
     )
 
-    try:
-        if os.path.commonpath(
-            [data_root, requested_path]
-        ) != data_root:
-            return None
-    except ValueError:
-        return None
 
-    return requested_path
+from search_engine.engine import search_index
+
+
+
+
+
 
 
 # ============================================================

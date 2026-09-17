@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
-const API_BASE_URL = 'http://127.0.0.1:5000'
+// Requests go to the page's own origin and are proxied to the Flask
+// API by the Vite dev server (see vite.config.js). Calling
+// http://127.0.0.1:5000 directly from the browser only works when the
+// page itself is served from the developer's machine; it breaks behind
+// any proxy, tunnel or remote preview, because 127.0.0.1 then refers to
+// the viewer's machine rather than the server's.
+const API_BASE_URL = ''
 
 function renderHighlightedSnippet(text, highlights = []) {
   if (!text) {

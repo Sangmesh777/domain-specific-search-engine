@@ -9,3 +9,15 @@ frontend/dist/
 
 .env
 *.log
+
+# Android / Gradle build output. The Android sources are checked in, but
+# nothing they produce is: no APK has ever been built here.
+android/.gradle/
+android/build/
+android/*/build/
+android/local.properties
+android/.idea/
+*.apk
+*.aab
+*.keystore
+*.jks
