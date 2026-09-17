@@ -1,4 +1,4 @@
-package com.vtu.search.parity
+﻿package com.vtu.search.parity
 
 import java.io.File
 import kotlin.test.Test
@@ -22,10 +22,10 @@ class ContractParityTest {
             ?: File("../tests/golden/search_engine_vectors.json")
 
     private val document = GoldenVectors.parse(
-        vectorsPath.readText(encoding = Charsets.UTF_8),
+        vectorsPath.readText(Charsets.UTF_8),
     )
 
-    private val contract = document["contract_vectors"]!!
+    private val contract = document["contract_vectors"] as kotlinx.serialization.json.JsonObject
 
     @Test
     fun `golden vector file is present`() {
@@ -82,18 +82,28 @@ class ContractParityTest {
     fun `sanitizer matches every recorded case`() {
         val failures = ArrayList<String>()
 
-        for (case in cases("sanitize_filename")) {
-            val actual = SecureFilename.sanitize(case.input)
+        val sanitizerCases =
+            contract["sanitize_filename"] as kotlinx.serialization.json.JsonArray
 
-            if (actual != case.expected.singleOrNull()) {
+        for (element in sanitizerCases) {
+            val obj = element as kotlinx.serialization.json.JsonObject
+
+            val input =
+                (obj["input"] as kotlinx.serialization.json.JsonPrimitive).content
+
+            val expected =
+                (obj["expected"] as kotlinx.serialization.json.JsonPrimitive).content
+
+            val actual = SecureFilename.sanitize(input)
+
+            if (actual != expected) {
                 failures +=
-                    "sanitize(${case.input}) expected ${case.expected} but got [$actual]"
+                    "sanitize($input) expected [$expected] but got [$actual]"
             }
         }
 
         assertTrue(failures.isEmpty(), failures.joinToString("\n"))
     }
-
     @Test
     fun `rounding matches every recorded case`() {
         val failures = ArrayList<String>()
@@ -198,7 +208,7 @@ class SecureFilenameTest {
     @Test
     fun `disallowed characters are removed not replaced`() {
         assertEquals("ab.txt", SecureFilename.sanitize("a!b.txt"))
-        assertEquals("abc.txt", SecureFilename.sanitize("a#b$c.txt"))
+        assertEquals("abc.txt", SecureFilename.sanitize("a#b\$c.txt"))
         assertEquals("100.txt", SecureFilename.sanitize("100%.txt"))
     }
 
@@ -269,3 +279,4 @@ class PythonRoundTest {
         assertEquals(2.0, PythonRound.round(2.5, 0))
     }
 }
+

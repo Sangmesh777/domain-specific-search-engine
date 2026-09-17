@@ -1,4 +1,4 @@
-package com.vtu.search.parity
+﻿package com.vtu.search.parity
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -43,7 +43,7 @@ object ContractHarness {
             ?: File("../tests/golden/search_engine_vectors.json")
 
     fun run(vectorsPath: File = defaultVectorsPath(), oracle: SearchOracle? = null): Report {
-        val document = GoldenVectors.parse(vectorsPath.readText(encoding = Charsets.UTF_8))
+        val document = GoldenVectors.parse(vectorsPath.readText(Charsets.UTF_8))
 
         val contractFailures = ArrayList<String>()
         var contractChecks = 0

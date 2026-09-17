@@ -26,4 +26,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "domain-specific-search-engine"
 
-include(":harness")
+include(":harness", ":app")

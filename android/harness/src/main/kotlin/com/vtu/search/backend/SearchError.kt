@@ -1,4 +1,4 @@
-package com.vtu.search.backend
+﻿package com.vtu.search.backend
 
 /**
  * Shared domain error model.
@@ -12,7 +12,7 @@ package com.vtu.search.backend
  */
 sealed class SearchError(
     message: String,
-    val cause: Throwable? = null,
+    cause: Throwable? = null,
 ) : Exception(message, cause) {
 
     /**
