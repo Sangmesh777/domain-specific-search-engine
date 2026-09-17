@@ -62,8 +62,8 @@ tests/test_golden_vectors.py             2  Full 79-vector replay
 when nothing is listening:
 
 ```text
-with a server     : 444 passed
-without a server  : 435 passed, 9 skipped
+with a server     : 448 passed
+without a server  : 439 passed, 9 skipped
 ```
 
 ## Architecture
