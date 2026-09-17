@@ -9,8 +9,7 @@ evidence about the Kotlin, not merely about Python calling Python.
 
 That substitution is only as good as its coverage, and coverage is easy
 to overstate. This prints it section by section: what the model
-reproduces, what it does not, and what no model can reach because it
-needs the whole ranking pipeline.
+reproduces, what it does not, and the ranking pipeline.
 
 Usage: python3 -m tools.port_gap          exit 0 when every modelled
                                           section is at 100%
@@ -40,15 +39,20 @@ MODELLED = {
     "filename_tokenize": lambda case: port_model.tokenize_filename(
         case["input"]
     ) == case["expected"],
+    "normalize_search_query": lambda case: port_model.normalize_search_query(
+        case["input"]
+    ) == case["expected"],
+    "parse_filetype_filter": lambda case: port_model.parse_filetype_filter(
+        case["input"]
+    ) == (case["expected_query"], case["expected_filetype"]),
+    "round_half_even": lambda case: port_model.round_half_even(
+        case["value"], case["digits"]
+    ) == case["expected"],
 }
 
 # Sections with no model on the Python side. Each is a real gap for the
 # port, and none of them is covered by the differential tests.
-UNMODELLED = (
-    "normalize_search_query",
-    "parse_filetype_filter",
-    "round_half_even",
-)
+UNMODELLED = ()
 
 
 def character_class_score(contract):
@@ -72,6 +76,55 @@ def character_class_score(contract):
     )
 
     return alnum_ok + space_ok, len(alnum) + len(whitespace)
+
+
+def ranking_score(document):
+    """Score the ranking vectors using the port model against sidecar indexes."""
+    from tools.generate_golden_vectors import normalize_response
+    from tools.verify_golden_vectors import compare_values
+
+    inv, meta, fn_idx, pg_idx = port_model.load_sidecar_indexes()
+
+    passed = 0
+    total = 0
+
+    for vector in document["vectors"]:
+        total += 1
+        actual = normalize_response(
+            port_model.search_index(
+                vector["query"],
+                vector["params"]["page"],
+                vector["params"]["limit"],
+                inv,
+                meta,
+                fn_idx,
+                pg_idx,
+            )
+        )
+        diffs = []
+        compare_values(actual, vector["response"], "root", 0.0, diffs)
+        if not diffs:
+            passed += 1
+
+    for vector in document["empty_corpus_vectors"]:
+        total += 1
+        actual = normalize_response(
+            port_model.search_index(
+                vector["query"],
+                vector["params"]["page"],
+                vector["params"]["limit"],
+                {},
+                {},
+                {},
+                {},
+            )
+        )
+        diffs = []
+        compare_values(actual, vector["response"], "root", 0.0, diffs)
+        if not diffs:
+            passed += 1
+
+    return passed, total
 
 
 def main():
@@ -99,7 +152,7 @@ def main():
         if mark == "GAP":
             incomplete.append(section)
 
-        print(f"  {section:22} {passed:3d}/{len(cases):3d}  {mark}")
+        print(f"  {section:24} {passed:3d}/{len(cases):3d}  {mark}")
 
     passed, total = character_class_score(
         contract["character_classes"]
@@ -112,13 +165,16 @@ def main():
     if mark == "GAP":
         incomplete.append("character_classes")
 
-    print(f"  {'character_classes':22} {passed:3d}/{total:3d}  {mark}")
+    print(f"  {'character_classes':24} {passed:3d}/{total:3d}  {mark}")
 
     print()
     print("NOT MODELLED IN PYTHON")
     print("=" * 58)
 
     unmodelled_total = 0
+
+    if not UNMODELLED:
+        print("  (none - all contract sections are modelled)")
 
     for section in UNMODELLED:
 
@@ -131,24 +187,28 @@ def main():
         if section == "round_half_even":
             note = "  (Kotlin exists, no Python model)"
 
-        print(f"  {section:22} {count:3d} vectors  GAP{note}")
-
-    ranking = len(document["vectors"]) + len(
-        document["empty_corpus_vectors"]
-    )
+        print(f"  {section:24} {count:3d} vectors  GAP{note}")
 
     print()
-    print("NEEDS THE RANKING PIPELINE")
+    print("RANKING PIPELINE COVERAGE")
     print("=" * 58)
-    print(f"  {'corpus + empty-corpus':22} {ranking:3d} vectors  GAP")
+
+    ranking_passed, ranking_total = ranking_score(document)
+    ranking_mark = "OK" if ranking_passed == ranking_total else "GAP"
+
+    if ranking_mark == "GAP":
+        incomplete.append("ranking_pipeline")
+
+    print(
+        f"  {'corpus + empty-corpus':24} {ranking_passed:3d}/{ranking_total:3d}  {ranking_mark}"
+    )
 
     print()
     print(
-        f"  modelled   : {modelled_total} contract vectors"
+        f"  modelled   : {modelled_total} contract vectors + {ranking_passed} ranking vectors"
     )
     print(
-        f"  unmodelled : {unmodelled_total} contract vectors "
-        f"+ {ranking} ranking vectors"
+        f"  unmodelled : {unmodelled_total} contract vectors + {ranking_total - ranking_passed} ranking vectors"
     )
 
     if incomplete:

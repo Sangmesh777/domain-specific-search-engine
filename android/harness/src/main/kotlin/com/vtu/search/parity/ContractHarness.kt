@@ -2,6 +2,7 @@ package com.vtu.search.parity
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
@@ -40,7 +41,16 @@ object ContractHarness {
     fun defaultVectorsPath(): File =
         System.getProperty("golden.vectors.path")
             ?.let(::File)
-            ?: File("../tests/golden/search_engine_vectors.json")
+            ?: File("../tests/golden/search_engine_vectors.json").let {
+                if (it.exists()) it else File("tests/golden/search_engine_vectors.json")
+            }
+
+    fun defaultSidecarPath(): File =
+        System.getProperty("corpus.sidecar.path")
+            ?.let(::File)
+            ?: File("../artifacts/android/corpus_sidecar.json").let {
+                if (it.exists()) it else File("artifacts/android/corpus_sidecar.json")
+            }
 
     fun run(vectorsPath: File = defaultVectorsPath(), oracle: SearchOracle? = null): Report {
         val document = GoldenVectors.parse(vectorsPath.readText(encoding = Charsets.UTF_8))
@@ -52,16 +62,29 @@ object ContractHarness {
         contractChecks += checkFilenameTokenizer(document, contractFailures)
         contractChecks += checkSanitizer(document, contractFailures)
         contractChecks += checkRounding(document, contractFailures)
+        contractChecks += checkNormalizeSearchQuery(document, contractFailures)
+        contractChecks += checkParseFiletypeFilter(document, contractFailures)
+
+        val activeOracle: SearchOracle? = oracle ?: run {
+            val sidecarFile = defaultSidecarPath()
+            if (sidecarFile.exists()) {
+                com.vtu.search.ranking.RankingEngine.fromSidecarJson(
+                    sidecarFile.readText(encoding = Charsets.UTF_8),
+                )
+            } else {
+                null
+            }
+        }
 
         val searchFailures = ArrayList<String>()
         var searchChecks = 0
 
-        if (oracle != null) {
+        if (activeOracle != null) {
             for (vector in GoldenVectors.load(document)) {
                 searchChecks++
 
                 val actual = GoldenVectors.normalizeResponse(
-                    oracle.search(vector.query, vector.page, vector.limit),
+                    activeOracle.search(vector.query, vector.page, vector.limit),
                 )
 
                 val differences = GoldenVectors.compare(actual, vector.expected)
@@ -79,7 +102,7 @@ object ContractHarness {
             contractFailures = contractFailures,
             searchChecks = searchChecks,
             searchFailures = searchFailures,
-            searchBlocked = oracle == null,
+            searchBlocked = activeOracle == null,
         )
     }
 
@@ -162,6 +185,49 @@ object ContractHarness {
 
             if (actual != expected) {
                 failures += "round($value, $digits) expected $expected but got $actual"
+            }
+        }
+
+        return cases.size
+    }
+
+    private fun checkNormalizeSearchQuery(
+        document: JsonObject,
+        failures: MutableList<String>,
+    ): Int {
+        val cases = contractSection(document)["normalize_search_query"] as? JsonArray ?: return 0
+
+        for (element in cases) {
+            val case = element as JsonObject
+            val input = (case["input"] as JsonPrimitive).content
+            val expected = (case["expected"] as JsonPrimitive).content
+            val actual = PythonText.normalizeSearchQuery(input)
+
+            if (actual != expected) {
+                failures += "normalizeSearchQuery($input) expected \"$expected\" but got \"$actual\""
+            }
+        }
+
+        return cases.size
+    }
+
+    private fun checkParseFiletypeFilter(
+        document: JsonObject,
+        failures: MutableList<String>,
+    ): Int {
+        val cases = contractSection(document)["parse_filetype_filter"] as? JsonArray ?: return 0
+
+        for (element in cases) {
+            val case = element as JsonObject
+            val input = (case["input"] as JsonPrimitive).content
+            val expectedQuery = (case["expected_query"] as JsonPrimitive).content
+            val expectedFiletype = (case["expected_filetype"] as? JsonPrimitive)?.let {
+                if (it is JsonNull || it.content == "null") null else it.content
+            }
+            val (actualQuery, actualFiletype) = PythonText.parseFiletypeFilter(input)
+
+            if (actualQuery != expectedQuery || actualFiletype != expectedFiletype) {
+                failures += "parseFiletypeFilter($input) expected ($expectedQuery, $expectedFiletype) but got ($actualQuery, $actualFiletype)"
             }
         }
 
