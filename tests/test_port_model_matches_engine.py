@@ -18,8 +18,13 @@ which is exactly the cross-mode drift the port must not have.
 
 import pytest
 
+from search_engine.engine import search_index as engine_search_index
 from search_engine.sanitize import sanitize_upload_filename
-from search_engine.text import tokenize_filename
+from search_engine.text import (
+    normalize_search_query as engine_normalize_query,
+    parse_filetype_filter as engine_parse_filetype,
+    tokenize_filename,
+)
 from tools import port_model
 
 CORPUS = [
@@ -217,3 +222,61 @@ def test_the_recorded_contract_can_detect_the_separator_blind_bug():
 
     assert recorded["dir\\sub\\file.txt"] == "dirsubfile.txt"
     assert "_" not in recorded["dir\\sub\\file.txt"]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "BCS502 Module 2.pdf",
+        "BCS502 Module 2.docx",
+        "notes.txt",
+        "plain query",
+        '"BCS502 Module 2.pdf"',
+        "data.csv",
+        "",
+        "   ",
+        "nested.pdf.txt",
+        '"quoted query"',
+    ],
+)
+def test_model_normalizes_query_identically_to_engine(query):
+    assert port_model.normalize_search_query(query) == engine_normalize_query(query)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "pdf",
+        ".pdf",
+        "network pdf",
+        "network .pdf",
+        "BCS502 Module 2.pdf",
+        '"BCS502 Module 2.pdf"',
+        "notes docx",
+        "notes txt",
+        "plain query",
+        "",
+        "notes.txt",
+        "deep learning .docx",
+        'file.pdf"',
+    ],
+)
+def test_model_parses_filetype_filter_identically_to_engine(query):
+    assert port_model.parse_filetype_filter(query) == engine_parse_filetype(query)
+
+
+def test_model_search_index_matches_engine_search_index():
+    inv, meta, fn_idx, pg_idx = port_model.load_sidecar_indexes()
+    test_queries = [
+        ("network", None, None),
+        ("BCS502", "1", "5"),
+        ("pdf", None, None),
+        ('"network security"', None, None),
+        ("999", None, None),
+        ("nonexistentwordxyz", None, None),
+        ("", None, None),
+    ]
+    for q, page, limit in test_queries:
+        model_res = port_model.search_index(q, page, limit, inv, meta, fn_idx, pg_idx)
+        engine_res = engine_search_index(q, page, limit, inv, meta, fn_idx, pg_idx)
+        assert model_res == engine_res, f"Mismatch on query={q!r}"

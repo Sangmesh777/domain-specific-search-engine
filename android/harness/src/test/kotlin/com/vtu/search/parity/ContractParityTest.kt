@@ -117,6 +117,74 @@ class ContractParityTest {
         assertTrue(failures.isEmpty(), failures.joinToString("\n"))
     }
 
+    @Test
+    fun `normalize search query matches every recorded case`() {
+        val failures = ArrayList<String>()
+
+        val cases = contract["normalize_search_query"] as kotlinx.serialization.json.JsonArray
+        for (element in cases) {
+            val case = element as kotlinx.serialization.json.JsonObject
+            val input = (case["input"] as kotlinx.serialization.json.JsonPrimitive).content
+            val expected = (case["expected"] as kotlinx.serialization.json.JsonPrimitive).content
+
+            val actual = PythonText.normalizeSearchQuery(input)
+            if (actual != expected) {
+                failures += "normalizeSearchQuery($input) expected \"$expected\" but got \"$actual\""
+            }
+        }
+
+        assertTrue(failures.isEmpty(), failures.joinToString("\n"))
+    }
+
+    @Test
+    fun `filetype parser matches every recorded case`() {
+        val failures = ArrayList<String>()
+
+        val cases = contract["parse_filetype_filter"] as kotlinx.serialization.json.JsonArray
+        for (element in cases) {
+            val case = element as kotlinx.serialization.json.JsonObject
+            val input = (case["input"] as kotlinx.serialization.json.JsonPrimitive).content
+            val expectedQuery = (case["expected_query"] as kotlinx.serialization.json.JsonPrimitive).content
+            val expectedFiletype = (case["expected_filetype"] as? kotlinx.serialization.json.JsonPrimitive)?.let {
+                if (it is kotlinx.serialization.json.JsonNull || it.content == "null") null else it.content
+            }
+
+            val (actualQuery, actualFiletype) = PythonText.parseFiletypeFilter(input)
+            if (actualQuery != expectedQuery || actualFiletype != expectedFiletype) {
+                failures += "parseFiletypeFilter($input) expected ($expectedQuery, $expectedFiletype) but got ($actualQuery, $actualFiletype)"
+            }
+        }
+
+        assertTrue(failures.isEmpty(), failures.joinToString("\n"))
+    }
+
+    @Test
+    fun `ranking engine replays every golden search vector`() {
+        val sidecarPath = ContractHarness.defaultSidecarPath()
+        if (!sidecarPath.exists()) return
+
+        val oracle = com.vtu.search.ranking.RankingEngine.fromSidecarJson(
+            sidecarPath.readText(encoding = Charsets.UTF_8),
+        )
+
+        val failures = ArrayList<String>()
+        var tested = 0
+
+        for (vector in GoldenVectors.load(document)) {
+            tested++
+            val actual = GoldenVectors.normalizeResponse(
+                oracle.search(vector.query, vector.page, vector.limit),
+            )
+            val diffs = GoldenVectors.compare(actual, vector.expected)
+            if (diffs.isNotEmpty()) {
+                failures += "${vector.id} (q=${vector.query}): " + diffs.take(3).joinToString("; ")
+            }
+        }
+
+        assertTrue(tested > 0, "no search vectors were run")
+        assertTrue(failures.isEmpty(), "search vector failures:\n" + failures.take(20).joinToString("\n"))
+    }
+
     private data class StringCase(val input: String, val expected: List<String>)
 
     private fun cases(section: String): List<StringCase> {
@@ -155,6 +223,20 @@ class PythonTextDivergenceTest {
         assertTrue(PythonText.isPythonAlnum(0x00B2), "U+00B2 should be alnum")
         assertTrue(PythonText.isPythonAlnum(0x216B), "U+216B should be alnum")
         assertFalse(PythonText.isPythonAlnum(0x0307), "U+0307 should not be alnum")
+    }
+
+    @Test
+    fun `digit check matches python superscripts and digits`() {
+        assertTrue(PythonText.isPythonDigit(0x0030), "0 should be digit")
+        assertTrue(PythonText.isPythonDigit(0x0039), "9 should be digit")
+        assertTrue(PythonText.isPythonDigit(0x00B2), "² should be digit")
+        assertTrue(PythonText.isPythonDigit(0x00B3), "³ should be digit")
+        assertTrue(PythonText.isPythonDigit(0x00B9), "¹ should be digit")
+        assertFalse(PythonText.isPythonDigit(0x00BD), "½ should not be digit")
+        assertTrue(PythonText.isPythonDigit("123"), "123 should be digit string")
+        assertTrue(PythonText.isPythonDigit("999"), "999 should be digit string")
+        assertFalse(PythonText.isPythonDigit("12a"), "12a should not be digit string")
+        assertFalse(PythonText.isPythonDigit(""), "empty string should not be digit string")
     }
 
     @Test

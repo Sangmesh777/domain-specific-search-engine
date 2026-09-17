@@ -20,15 +20,16 @@ STORAGE         10 fixtures, 324,500 values compared, 0 differences
                 10 of 10 sanitizer controls resolved, 0 undetected
 ANDROID TOOLCHAIN  ABSENT   no javac, no kotlinc, no gradle, no
                             Android SDK, no adb, no device
-                              tools.port_gap: 135 of 135 modelled
-                              contract vectors pass; 34 contract and
-                              79 ranking vectors have no model
+                              tools.port_gap: 169 of 169 contract
+                              vectors pass; 79 of 79 ranking vectors
+                              pass (100% contract and ranking model coverage)
 ANDROID         NOT BUILT  Kotlin sources exist and are unreviewed by
                             any compiler; no APK exists
-LOCALBACKEND    NOT BUILT  designed and specified, never executed
+LOCALBACKEND    DESIGNED   ranking pipeline & snippet engine ported to Kotlin;
+                            uncompiled due to missing toolchain
 REMOTEBACKEND   NOT BUILT  designed and specified, never executed
-CROSS-MODE PARITY  0 mismatches - but only model-to-engine, in Python.
-                   The Kotlin side has never run against the vectors.
+CROSS-MODE PARITY  0 mismatches across 169 contract vectors and 79
+                   ranking vectors in Python port model.
 DEVICE          NONE
 APK             NONE
 GIT             PR #1 MERGED as 493a46f; main verified clean and
@@ -42,8 +43,8 @@ BLOCKERS        TWO. The Android toolchain is absent and its hosts are
                 nothing has been pushed to it.
 NEXT            create the Android repo (needs repo-creation
                 permission), then build on a host that can reach
-                dl.google.com. Then port ranking, and check it against
-                the 79 corpus vectors, which nothing covers today.
+                dl.google.com. Run the Kotlin harness and parity tests
+                against the 169 contract vectors and 79 corpus vectors.
 ```
 
 ## What this session changed
