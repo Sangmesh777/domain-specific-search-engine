@@ -62,8 +62,8 @@ tests/test_golden_vectors.py             2  Full 79-vector replay
 when nothing is listening:
 
 ```text
-with a server     : 294 passed
-without a server  : 285 passed, 9 skipped
+with a server     : 440 passed
+without a server  : 431 passed, 9 skipped
 ```
 
 ## Architecture
@@ -893,3 +893,72 @@ the contract and must be reviewable in diffs:
 
 * `tests/golden/search_engine_vectors.json`
 * `artifacts/android/corpus_sidecar.json`
+
+## Layer 6: removing the web stack from `search_engine` (done)
+
+`search_engine` is the transport-independent core, so it must not import
+the web stack. An AST scan over the package found exactly one violation:
+`search_engine/sanitize.py` did `from werkzeug.utils import
+secure_filename`. There were no `request`, `jsonify` or `session` nodes
+anywhere in the package.
+
+The helper is now transcribed into `sanitize.py` with the same order of
+operations, the same regex and the same Windows device-name check. Two
+host-dependent lines are kept exactly as they were, because changing
+them would change stored document names:
+
+* `os.sep` and `os.path.altsep` decide which characters become spaces,
+  so a Windows host sanitizes a backslash differently from a POSIX one;
+* `os.name == "nt"` gates the device-name check.
+
+The transcription is not trusted; it is compared against werkzeug's real
+function over a 6,000-case corpus built to hit every branch
+(`tests/test_sanitizer_independence.py`). The corpus is asserted to be
+wide enough to mean something, so it cannot be trimmed into a no-op. The
+Windows branch cannot fire on this host, so it is driven separately by
+`tools/sanitizer_windows_check.py`, which patches `os.name` in a bare
+interpreter: doing it inside pytest makes pathlib raise
+`NotImplementedError: cannot instantiate 'WindowsPath'`, and a suite that
+dies for that unrelated reason is indistinguishable from one that found
+a real divergence. That check reports 6,205 calls, 27 device names
+actually prefixed, 0 divergences.
+
+### The defect this uncovered
+
+`tools/port_model.py` is the specification the Kotlin sources were
+written from, and `SecureFilename.kt` mirrored it: both stripped
+directory components by scanning for `/` **or** `\`, with a comment
+claiming this mirrored `os.path.basename`. On POSIX it does not. Only `/`
+separates there, so `os.path.basename("dir\sub\file.txt")` returns the
+whole string and it is `secure_filename` that deletes the backslash,
+giving `dirsubfile.txt`.
+
+So the port would have stored `file.txt` where the server stores
+`dirsubfile.txt`: different document names, different filename tokens,
+different search results, for the same file. Both sides were fixed and
+`tests/test_port_model_matches_engine.py` now compares the model to the
+engine directly, over a corpus asserted to contain a discriminating case.
+
+The recorded contract could not have caught this. It contained exactly
+one backslash input, `..\..\x.txt`, which sanitizes to `x.txt` either
+way. Since the Android harness has no Python engine and can only compare
+Kotlin against `tests/golden/search_engine_vectors.json`, ten
+discriminating cases were added to `SANITIZE_INPUTS` and the vectors
+regenerated. Regeneration is deterministic (identical SHA-256 on repeat)
+and the diff is exactly those ten entries; all 79 corpus vectors and the
+engine index state are byte-identical, which is the evidence that no
+engine behaviour changed.
+
+### Why the controls are now part of the gate
+
+`run_tests.sh` ran seven gates and none of them was the negative-control
+suite. When the extraction rule moved into `search_engine/indexing.py`,
+two storage controls silently stopped matching anything: their anchors
+still referred to the code that had moved. The gate reported
+`ALL GATES PASSED` the whole time.
+
+The anchors are repointed and `run_tests.sh` now runs the controls as
+gates of their own, so a control that stops applying fails the build
+instead of quietly reducing coverage. Both control runners report "not
+applied" distinctly from "not detected", and each patch asserts its
+anchor matched and that the file digest changed.

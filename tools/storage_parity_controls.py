@@ -189,21 +189,32 @@ def delete_skips_pages():
 
 @control("the index build sorts the filename tokens")
 def build_sorts_tokens():
+    # The rebuild loop no longer tokenizes inline; it reads what
+    # `extract_document` returned. The anchor moved with the code, and
+    # this control spent a while reporting "not applied" because the
+    # negative-control suite was not part of the gate that anyone ran.
     apply_patch(
         INDEXING,
-        "            ] = filename_words",
-        "            ] = sorted(filename_words)",
+        '] = extracted["filename_words"]',
+        '] = sorted(extracted["filename_words"])',
         label="build sorts tokens",
     )
 
 
-@control("the index build stops skipping documents with no text")
+@control("documents with no readable text stop being treated as unreadable")
 def build_keeps_empty_documents():
+    # The skip used to be two lines in the rebuild loop. It now lives in
+    # the single extraction rule, so that is where it has to be broken:
+    # `extract_document` returning `None` is what makes the rebuild
+    # print its skip line and the upload path raise `ValueError`, and
+    # both callers depend on it.
     apply_patch(
         INDEXING,
-        "            if not content_words:",
-        "            if False:",
-        label="build keeps empty documents",
+        """    if not content_words:
+        return None""",
+        """    if False:
+        return None""",
+        label="empty documents are no longer unreadable",
     )
 
 

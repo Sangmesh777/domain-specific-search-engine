@@ -113,6 +113,29 @@ SANITIZE_INPUTS = [
     "..\\..\\x.txt",
     "a/b/c.txt",
     "/abs/path.txt",
+    # Backslashes are NOT separators on the platform the engine runs on.
+    # `os.path.basename` splits on `/` only, so a Windows-shaped name is
+    # handed to `secure_filename` whole and its backslashes are deleted
+    # as disallowed characters. That yields `dirsubfile.txt`, not
+    # `file.txt`.
+    #
+    # `..\..\x.txt` above cannot see the difference: it sanitizes to
+    # `x.txt` whether or not backslash is treated as a separator. The
+    # cases below exist so the recorded contract can, because the
+    # Android harness has no access to the Python engine and can only
+    # compare against these vectors. Without them a port that split on
+    # both separators would pass the parity suite while storing
+    # different document names than the server.
+    "dir\\sub\\file.txt",
+    "C:\\Users\\me\\report.pdf",
+    "\\\\server\\share\\doc.docx",
+    "..\\..\\etc\\passwd.txt",
+    "dir\\..\\..\\x.txt",
+    "a\\b.txt",
+    "\\leading.txt",
+    "trailing\\",
+    "mixed\\dir/sub\\leaf.txt",
+    "sub\\..\\name.txt",
     ".hidden.txt",
     "...hidden.txt",
     "My  File...txt",

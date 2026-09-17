@@ -117,16 +117,31 @@ object SecureFilename {
     /**
      * Strip every directory component.
      *
-     * This mirrors `os.path.basename`. Both separator styles are
-     * handled because an upload may arrive from any client.
+     * This mirrors `os.path.basename` **on the platform the engine runs
+     * on**, which is POSIX, and there only `/` separates. A backslash is
+     * an ordinary character: `os.path.basename("dir\\sub\\file.txt")`
+     * returns the whole string, and it is `secureFilename` that then
+     * deletes the backslash, yielding `dirsubfile.txt`.
+     *
+     * This previously broke on both separators, with a comment claiming
+     * that mirrored `os.path.basename` because "an upload may arrive
+     * from any client". It does not mirror it, and the effect was a real
+     * cross-mode divergence: every Windows-shaped upload name would have
+     * been stored as `file.txt` on Android and `dirsubfile.txt` on the
+     * server, producing different filename tokens and different search
+     * results for the same document.
+     *
+     * The recorded contract vector `..\\..\\x.txt` returns `x.txt`
+     * under both behaviours, so the vectors could not catch it; the
+     * divergence was found by comparing this file's model against the
+     * engine directly, which `tests/test_port_model_matches_engine.py`
+     * now does permanently.
      */
     fun basename(filename: String): String {
         var end = filename.length
 
         while (end > 0) {
-            val character = filename[end - 1]
-
-            if (character == '/' || character == '\\') {
+            if (filename[end - 1] == '/') {
                 break
             }
 

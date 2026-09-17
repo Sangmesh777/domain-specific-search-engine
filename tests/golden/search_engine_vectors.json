@@ -655,6 +655,46 @@
         "input": "/abs/path.txt"
       },
       {
+        "expected": "dirsubfile.txt",
+        "input": "dir\\sub\\file.txt"
+      },
+      {
+        "expected": "CUsersmereport.pdf",
+        "input": "C:\\Users\\me\\report.pdf"
+      },
+      {
+        "expected": "serversharedoc.docx",
+        "input": "\\\\server\\share\\doc.docx"
+      },
+      {
+        "expected": "etcpasswd.txt",
+        "input": "..\\..\\etc\\passwd.txt"
+      },
+      {
+        "expected": "dir....x.txt",
+        "input": "dir\\..\\..\\x.txt"
+      },
+      {
+        "expected": "ab.txt",
+        "input": "a\\b.txt"
+      },
+      {
+        "expected": "leading.txt",
+        "input": "\\leading.txt"
+      },
+      {
+        "expected": "",
+        "input": "trailing\\"
+      },
+      {
+        "expected": "subleaf.txt",
+        "input": "mixed\\dir/sub\\leaf.txt"
+      },
+      {
+        "expected": "sub..name.txt",
+        "input": "sub\\..\\name.txt"
+      },
+      {
         "expected": "hidden.txt",
         "input": ".hidden.txt"
       },
