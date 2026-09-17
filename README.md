@@ -27,11 +27,11 @@ this work was done. See [Status](#status) for exactly what is real.
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| Flask search API | **Working** | 294 tests pass with the server running |
+| Flask search API | **Working** | 440 tests pass with the server running |
 | `search_engine/` extraction | **Done** | 5 layers; app.py 4085 -> 1571 lines; engine and storage are Flask-free and parity-proven. Route handlers other than search are still long (see DEVELOPMENT.md) |
 | Ranking engine | **Working** | 79/79 golden vectors, exact binary64 |
 | React web UI | **Working** | builds cleanly; live search verified through the proxy |
-| Test suite | **Working** | 294 pass with a server; 285 pass + 9 skip without one |
+| Test suite | **Working** | 440 pass with a server; 431 pass + 9 skip without one |
 | Shadow parity gate | **Working** | 12 functions, 21,454 comparisons, 0 differences |
 | Memory mutation coherence | **Closed** | copy-on-write publish; 20 tests, all 5 negative controls confirmed |
 | Persistence extraction | **Done** | app.py holds no SQL; 324,500 values compared vs monolith, 0 differences, 8/8 controls detected |
@@ -149,8 +149,8 @@ explicit reason** rather than failing, so the suite is always
 meaningful:
 
 ```text
-with a server     : 118 passed
-without a server  : 109 passed, 9 skipped
+with a server     : 440 passed
+without a server  : 431 passed, 9 skipped
 ```
 
 ## Verifying the search contract

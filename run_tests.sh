@@ -11,8 +11,16 @@
 #   3. the shadow parity gate for extracted modules
 #   4. the mutation-equivalence gate for the index planners
 #   5. the storage reconstruction parity gate
-#   6. the corpus sidecar integrity check
-#   7. the complete pytest suite
+#   6. the negative controls for that gate, which prove it can fail
+#   7. the negative controls for the sanitizer transcription
+#   8. the corpus sidecar integrity check
+#   9. the complete pytest suite
+#
+# Steps 6 and 7 exist because a parity gate that cannot fail is worse
+# than no gate: it reports success. They were missing from this script
+# for a while, during which two storage controls silently stopped
+# applying to anything and nothing noticed, because the only thing that
+# ran them was a human remembering to.
 #
 # The pytest suite is hermetic: the live HTTP tests skip themselves with
 # an explicit reason when no server is listening on 127.0.0.1:5000.
@@ -69,6 +77,30 @@ if python3 -m tools.storage_equivalence; then
     echo "storage parity OK"
 else
     echo "storage parity FAILED"
+    failures=$((failures + 1))
+fi
+
+step "Negative controls (storage parity can fail)"
+if python3 -m tools.storage_parity_controls; then
+    echo "storage controls OK"
+else
+    echo "storage controls FAILED (a control no longer applies, or no longer fails the gate)"
+    failures=$((failures + 1))
+fi
+
+step "Negative controls (sanitizer transcription can fail)"
+if python3 -m tools.sanitizer_controls; then
+    echo "sanitizer controls OK"
+else
+    echo "sanitizer controls FAILED"
+    failures=$((failures + 1))
+fi
+
+step "Windows branch of the sanitizer, under a simulated nt host"
+if python3 -m tools.sanitizer_windows_check; then
+    echo "windows branch OK"
+else
+    echo "windows branch FAILED"
     failures=$((failures + 1))
 fi
 

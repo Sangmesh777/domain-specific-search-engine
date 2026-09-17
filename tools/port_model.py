@@ -184,12 +184,29 @@ def to_ascii(value):
 
 
 def basename(filename):
-    """Model of SecureFilename.basename."""
+    """
+    Model of SecureFilename.basename, i.e. `os.path.basename` on POSIX.
+
+    Only `/` separates. A backslash is an ordinary character here, not a
+    directory separator: `os.path.altsep` is `None` on POSIX, so
+    `os.path.basename("dir\\sub\\file.txt")` returns the whole string.
+    It is then `secure_filename` that deletes the backslash, giving
+    `dirsubfile.txt` for that input.
+
+    This used to split on `\\` as well, on the reasonable-sounding
+    grounds that "an upload may arrive from any client". That made the
+    model disagree with the engine for every Windows-shaped name, so the
+    Kotlin port would have stored `file.txt` where the server stores
+    `dirsubfile.txt`. The single recorded backslash vector,
+    `..\\..\\x.txt`, returns `x.txt` either way, so the vectors could
+    not see it. `tests/test_port_model_matches_engine.py` compares the
+    model to the engine directly for that reason.
+    """
 
     end = len(filename)
 
     while end > 0:
-        if filename[end - 1] in ("/", "\\"):
+        if filename[end - 1] == "/":
             break
         end -= 1
 
