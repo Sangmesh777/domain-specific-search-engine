@@ -550,6 +550,7 @@ def test_concurrent_readers_never_observe_a_mixed_generation(app_module):
 
     stop = threading.Event()
     failures = []
+    observations = []
 
     def reader():
         while not stop.is_set():
@@ -577,6 +578,8 @@ def test_concurrent_readers_never_observe_a_mixed_generation(app_module):
                 "filename_index": name in captured["filename_index"],
                 "page_text_index": name in captured["page_text_index"],
             }
+
+            observations.append(observed)
 
             if not all(presence.values()):
                 failures.append(f"torn container presence: {presence}")
@@ -613,6 +616,32 @@ def test_concurrent_readers_never_observe_a_mixed_generation(app_module):
             thread.join(timeout=10)
 
     assert not failures, failures[:5]
+
+    # The readers must have actually looked, and looked often. Without
+    # this the test passes when every reader thread exits immediately,
+    # which is the one way a "no torn read was observed" test can lie:
+    # it observed nothing and reports success.
+    # The threshold is well below the ~100 reads this reliably produces,
+    # because its job is to rule out "the readers never ran", not to
+    # measure throughput. A tight bound here would fail on a slower
+    # machine while proving nothing extra.
+    assert len(observations) > 20, (
+        f"only {len(observations)} reads completed, so the absence of a "
+        "torn read says nothing"
+    )
+
+    # And both generations must have been seen, otherwise the readers
+    # were never running during a mutation.
+    assert set(map(frozenset, observations)) == {
+        frozenset(generation_a),
+        frozenset(generation_b),
+    }, "the readers did not span both generations"
+
+    # Every read saw a full generation. Nothing was ever partial.
+    assert all(
+        frozenset(observed) in (frozenset(generation_a), frozenset(generation_b))
+        for observed in observations
+    )
 
     with engine.INDEX_DATA_LOCK:
         engine.publish_index_state(
