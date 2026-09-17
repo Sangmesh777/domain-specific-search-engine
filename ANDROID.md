@@ -677,3 +677,76 @@ Not done, and not claimed:
 * no device-side PDF/DOCX extraction parity
 
 Blocked entirely by the missing toolchain described in section 3.
+
+## 19. Measured port coverage, and the second blocker
+
+### What the Python model stands in for
+
+With no compiler available, `tools/port_model.py` is the only check on
+the Kotlin, so its coverage is the ceiling on what can honestly be
+claimed. `python3 -m tools.port_gap` prints it:
+
+```text
+  sanitize_filename       47/ 47  OK
+  content_tokenize        36/ 36  OK
+  filename_tokenize       10/ 10  OK
+  character_classes       42/ 42  OK
+
+NOT MODELLED IN PYTHON
+  normalize_search_query   7 vectors  GAP
+  parse_filetype_filter   10 vectors  GAP
+  round_half_even         17 vectors  GAP
+
+NEEDS THE RANKING PIPELINE
+  corpus + empty-corpus   79 vectors  GAP
+
+  modelled   : 135 contract vectors
+  unmodelled : 34 contract vectors + 79 ranking vectors
+```
+
+The 135 modelled vectors are reproduced exactly, and
+`tests/test_port_gap.py` pins that number so the coverage cannot drop
+without a test failing. The 34 and the 79 are real gaps and are asserted
+as gaps on purpose: if someone adds a model for
+`normalize_search_query`, `parse_filetype_filter` or `round_half_even`,
+the test fails until the section is moved and this document updated.
+
+`round_half_even` is the awkward one. `PythonRound.kt` exists and
+`tools/verify_jvm_semantics.py` reports 24,102 BigDecimal comparisons
+with 0 mismatches, but there is no Python-side model of it, so it is
+not covered by the model-versus-engine differential. It is Kotlin
+source that no compiler has read.
+
+### One thing the fix in this session changed for the port
+
+`SecureFilename.kt` used to strip directory components by scanning for
+`/` or `\`. On the platform the engine runs on, only `/` separates, so
+that was wrong and would have stored `file.txt` where the server stores
+`dirsubfile.txt`. It is fixed, and the recorded contract now contains
+ten discriminating backslash cases so the Kotlin harness will fail
+loudly if it regresses. See `ACCEPTANCE_REPORT.md`.
+
+### The second blocker
+
+`Sangmesh777/search-engine-android` could not be created. The GitHub
+integration is a GitHub App installation scoped to the existing
+repository: it can push branches, open and merge pull requests, but it
+cannot create repositories, and it cannot even read the authenticated
+user.
+
+```text
+gh repo create Sangmesh777/search-engine-android --public
+  GraphQL: Resource not accessible by integration (createRepository)
+
+gh api -X POST user/repos
+  Resource not accessible by integration (HTTP 403)
+```
+
+So the Android repository does not exist, and no code has been pushed to
+it. Creating it needs either a repository created by hand, or a GitHub
+connection with repository-creation permission. Once the repository
+exists, populated from `main` at `493a46f`, the contents of this
+branch's `android/` directory, `ANDROID.md`, `tools/port_model.py`,
+`tools/port_gap.py`, `tools/contract_vectors.py` and
+`tests/golden/search_engine_vectors.json` are what it should be seeded
+with.

@@ -5,11 +5,12 @@ in this checkout. Nothing here is estimated, and "implemented" is kept
 distinct from "compiled" and "tested".
 
 ```text
-CURRENT COMMIT  c9a6930  (backend tip; this report is added on top)
-                PR #1 head, base main @ 81faff9, 19 commits, 76 files
+CURRENT COMMIT  c9a6930  (backend tip; this report and the port-gap
+                tooling are added on top)
+                PR #1 was merged into main as 493a46f
 BACKEND         PASS      app.py 1448 lines; search_engine has 9 modules
-TESTS           444 passed, 1 warning          ./run_tests.sh
-                435 passed, 9 skipped          no server listening
+TESTS           448 passed, 1 warning          ./run_tests.sh
+                439 passed, 9 skipped          no server listening
 GOLDEN          79 of 79 vectors passed        tools.verify_golden_vectors
                 13 documents, 191 content terms
 SHADOW          12 functions, 21,454 comparisons, 0 differences
@@ -19,6 +20,9 @@ STORAGE         10 fixtures, 324,500 values compared, 0 differences
                 10 of 10 sanitizer controls resolved, 0 undetected
 ANDROID TOOLCHAIN  ABSENT   no javac, no kotlinc, no gradle, no
                             Android SDK, no adb, no device
+                              tools.port_gap: 135 of 135 modelled
+                              contract vectors pass; 34 contract and
+                              79 ranking vectors have no model
 ANDROID         NOT BUILT  Kotlin sources exist and are unreviewed by
                             any compiler; no APK exists
 LOCALBACKEND    NOT BUILT  designed and specified, never executed
@@ -27,10 +31,19 @@ CROSS-MODE PARITY  0 mismatches - but only model-to-engine, in Python.
                    The Kotlin side has never run against the vectors.
 DEVICE          NONE
 APK             NONE
-GIT             branch arena/01a09e59-domain-specific-search-engine
-                pushed, local == remote == c9a6930
-BLOCKERS        Android toolchain unavailable and unreachable
-NEXT            merge PR #1, create the Android repo, build there
+GIT             PR #1 MERGED as 493a46f; main verified clean and
+                green at 493a46f (444 passed, ALL GATES PASSED)
+                branch arena/01a09e59-domain-specific-search-engine
+                @ 471431b, local == remote
+BLOCKERS        TWO. The Android toolchain is absent and its hosts are
+                unreachable. Separately, the GitHub integration cannot
+                create repositories, so
+                Sangmesh777/search-engine-android does not exist and
+                nothing has been pushed to it.
+NEXT            create the Android repo (needs repo-creation
+                permission), then build on a host that can reach
+                dl.google.com. Then port ranking, and check it against
+                the 79 corpus vectors, which nothing covers today.
 ```
 
 ## What this session changed
