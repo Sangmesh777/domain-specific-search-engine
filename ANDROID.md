@@ -687,35 +687,36 @@ the Kotlin, so its coverage is the ceiling on what can honestly be
 claimed. `python3 -m tools.port_gap` prints it:
 
 ```text
-  sanitize_filename       47/ 47  OK
-  content_tokenize        36/ 36  OK
-  filename_tokenize       10/ 10  OK
-  character_classes       42/ 42  OK
+PORT MODEL COVERAGE OF THE RECORDED CONTRACT
+==========================================================
+  sanitize_filename         47/ 47  OK
+  content_tokenize          36/ 36  OK
+  filename_tokenize         10/ 10  OK
+  normalize_search_query     7/  7  OK
+  parse_filetype_filter     10/ 10  OK
+  round_half_even           17/ 17  OK
+  character_classes         42/ 42  OK
 
 NOT MODELLED IN PYTHON
-  normalize_search_query   7 vectors  GAP
-  parse_filetype_filter   10 vectors  GAP
-  round_half_even         17 vectors  GAP
+==========================================================
+  (none - all contract sections are modelled)
 
-NEEDS THE RANKING PIPELINE
-  corpus + empty-corpus   79 vectors  GAP
+RANKING PIPELINE COVERAGE
+==========================================================
+  corpus + empty-corpus     79/ 79  OK
 
-  modelled   : 135 contract vectors
-  unmodelled : 34 contract vectors + 79 ranking vectors
+  modelled   : 169 contract vectors + 79 ranking vectors
+  unmodelled : 0 contract vectors + 0 ranking vectors
 ```
 
-The 135 modelled vectors are reproduced exactly, and
-`tests/test_port_gap.py` pins that number so the coverage cannot drop
-without a test failing. The 34 and the 79 are real gaps and are asserted
-as gaps on purpose: if someone adds a model for
-`normalize_search_query`, `parse_filetype_filter` or `round_half_even`,
-the test fails until the section is moved and this document updated.
+All 169 contract vectors and all 79 ranking vectors are modelled and
+reproduced exactly. Both the Python model (`tools/port_model.py`) and the
+Kotlin sources (`android/harness/src/main/kotlin/com/vtu/search/ranking/`)
+now implement the complete ranking pipeline, snippet generation, query
+normalization, filetype filter parsing, and rounding parity.
 
-`round_half_even` is the awkward one. `PythonRound.kt` exists and
-`tools/verify_jvm_semantics.py` reports 24,102 BigDecimal comparisons
-with 0 mismatches, but there is no Python-side model of it, so it is
-not covered by the model-versus-engine differential. It is Kotlin
-source that no compiler has read.
+`tests/test_port_gap.py` pins that full coverage so any drop or omission
+fails the gate.
 
 ### One thing the fix in this session changed for the port
 

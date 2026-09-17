@@ -90,6 +90,53 @@ object PythonText {
             codePoint == 0x0085
 
     /**
+     * True when Python's `str.isdigit()` would be true for this code point.
+     *
+     * Python's `isdigit()` returns true for category Nd (decimal digits)
+     * and category No digits (superscripts ², ³, ¹, etc.).
+     * Java's `Character.isDigit` is false for superscripts.
+     */
+    fun isPythonDigit(codePoint: Int): Boolean {
+        if (Character.isDigit(codePoint)) return true
+        if (Character.getType(codePoint) != Character.OTHER_NUMBER.toInt()) return false
+
+        return (codePoint in 0x00B2..0x00B3) ||
+            codePoint == 0x00B9 ||
+            (codePoint in 0x1369..0x1371) ||
+            codePoint == 0x19DA ||
+            codePoint == 0x2070 ||
+            (codePoint in 0x2074..0x2079) ||
+            (codePoint in 0x2080..0x2089) ||
+            (codePoint in 0x2460..0x2468) ||
+            (codePoint in 0x2474..0x247C) ||
+            (codePoint in 0x2488..0x2490) ||
+            codePoint == 0x24EA ||
+            (codePoint in 0x24F5..0x24FD) ||
+            codePoint == 0x24FF ||
+            (codePoint in 0x2776..0x277E) ||
+            (codePoint in 0x2780..0x2788) ||
+            (codePoint in 0x278A..0x2792) ||
+            (codePoint in 0x10A40..0x10A43) ||
+            (codePoint in 0x10E60..0x10E68) ||
+            (codePoint in 0x11052..0x1105A) ||
+            (codePoint in 0x1F100..0x1F10A)
+    }
+
+    /**
+     * True if the text is non-empty and every code point satisfies [isPythonDigit].
+     */
+    fun isPythonDigit(text: String): Boolean {
+        if (text.isEmpty()) return false
+        var index = 0
+        while (index < text.length) {
+            val codePoint = text.codePointAt(index)
+            if (!isPythonDigit(codePoint)) return false
+            index += Character.charCount(codePoint)
+        }
+        return true
+    }
+
+    /**
      * Lowercase the whole string, then replace every character that is
      * neither alphanumeric nor whitespace with a single space.
      */
@@ -173,4 +220,88 @@ object PythonText {
      */
     fun tokenizeFilename(text: String): List<String> =
         pythonSplit(clean(text)).filter { it.isNotEmpty() }
+
+    /**
+     * Normalize a search query before filename/content matching.
+     * Supported document extensions (.pdf, .docx, .txt) at the end are stripped.
+     */
+    fun normalizeSearchQuery(rawQuery: String): String {
+        var query = rawQuery.trim()
+        if (query.isEmpty()) return ""
+
+        val quoteWrapped = query.length >= 2 && query.startsWith('"') && query.endsWith('"')
+        if (quoteWrapped) {
+            query = query.substring(1, query.length - 1).trim()
+        }
+
+        val lowerQuery = query.lowercase(Locale.ROOT)
+        val supportedExtensions = listOf(".pdf", ".docx", ".txt")
+
+        for (extension in supportedExtensions) {
+            if (lowerQuery.endsWith(extension)) {
+                query = query.substring(0, query.length - extension.length).trimEnd()
+                break
+            }
+        }
+
+        return if (quoteWrapped) "\"$query\"" else query
+    }
+
+    /**
+     * Extract an optional document-type filter from a raw search query.
+     *
+     * Returns Pair(remainingQuery, detectedFiletype).
+     */
+    fun parseFiletypeFilter(rawQuery: String): Pair<String, String?> {
+        val query = rawQuery.trim()
+        val supportedExtensions = listOf(
+            ".pdf" to "pdf",
+            ".docx" to "docx",
+            ".txt" to "txt",
+        )
+
+        val lowerQuery = query.lowercase(Locale.ROOT)
+        for ((extension, filetype) in supportedExtensions) {
+            val quotedSuffix = "$extension\""
+            if (lowerQuery.endsWith(quotedSuffix)) {
+                val remaining = query.substring(0, query.length - quotedSuffix.length).trimEnd()
+                val resultQuery = if (remaining.isNotEmpty()) "$remaining\"" else ""
+                return Pair(resultQuery, filetype)
+            }
+            if (lowerQuery.endsWith(extension)) {
+                val remaining = query.substring(0, query.length - extension.length).trimEnd()
+                return Pair(remaining, filetype)
+            }
+        }
+
+        val tokens = splitPythonWhitespace(query)
+        if (tokens.isEmpty()) {
+            return Pair(query, null)
+        }
+
+        val supportedTypes = mapOf(
+            "pdf" to "pdf",
+            ".pdf" to "pdf",
+            "docx" to "docx",
+            ".docx" to "docx",
+            "txt" to "txt",
+            ".txt" to "txt",
+        )
+
+        var detectedType: String? = null
+        val remainingTokens = ArrayList<String>()
+
+        for (token in tokens) {
+            val normalized = token.lowercase(Locale.ROOT).trim()
+            if (supportedTypes.containsKey(normalized)) {
+                if (detectedType == null) {
+                    detectedType = supportedTypes[normalized]
+                }
+            } else {
+                remainingTokens.add(token)
+            }
+        }
+
+        return Pair(remainingTokens.joinToString(" ").trim(), detectedType)
+    }
 }
