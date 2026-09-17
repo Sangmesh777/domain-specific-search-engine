@@ -13,8 +13,16 @@
 #   5. the storage reconstruction parity gate
 #   6. the negative controls for that gate, which prove it can fail
 #   7. the negative controls for the sanitizer transcription
-#   8. the corpus sidecar integrity check
-#   9. the complete pytest suite
+#   8. the port-coverage report
+#   9. the corpus sidecar integrity check
+#  10. the complete pytest suite
+#
+# There is an eleventh step that is deliberately absent: nothing here
+# compiles the Kotlin under android/. No javac, kotlinc, gradle or
+# Android SDK exists in this environment and their hosts are
+# unreachable, so the Kotlin has never been compiled. See
+# ACCEPTANCE_REPORT.md and run `python3 -m tools.port_gap` for what the
+# Python-side model does and does not stand in for.
 #
 # Steps 6 and 7 exist because a parity gate that cannot fail is worse
 # than no gate: it reports success. They were missing from this script
@@ -101,6 +109,14 @@ if python3 -m tools.sanitizer_windows_check; then
     echo "windows branch OK"
 else
     echo "windows branch FAILED"
+    failures=$((failures + 1))
+fi
+
+step "Port coverage (what the model reproduces, and what it does not)"
+if python3 -m tools.port_gap; then
+    echo "port coverage OK"
+else
+    echo "port coverage FAILED (a modelled section no longer matches the contract)"
     failures=$((failures + 1))
 fi
 
