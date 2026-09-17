@@ -623,53 +623,25 @@ def incrementally_index_document(
     not to the number of existing documents.
     """
 
-    text = extract_text(
+    # The rule for turning a document file into indexed parts lives in
+    # the indexing layer, because the rebuild path uses the same rule.
+    # Two copies of it is how an online index and an offline index drift
+    # apart.
+    extracted = indexing.extract_document(
         file_path,
         filename,
     )
 
-    content_words = tokenize(
-        text
-    )
-
-    term_counts = {}
-
-    for word in content_words:
-        term_counts[word] = (
-            term_counts.get(word, 0)
-            + 1
-        )
-
-    pages = extract_pages(
-        file_path,
-        filename,
-    )
-
-    filename_without_extension = (
-        os.path.splitext(filename)[0]
-    )
-
-    filename_words = tokenize_filename(
-        filename_without_extension
-    )
-
-    if not content_words:
+    if extracted is None:
         raise ValueError(
             "Document contains no readable text."
         )
 
-    metadata = {
-        "title": filename,
-        "path": os.path.abspath(
-            file_path
-        ),
-        "total_words": len(
-            content_words
-        ),
-        "page_count": len(
-            pages
-        ),
-    }
+    content_words = extracted["content_words"]
+    term_counts = extracted["term_counts"]
+    filename_words = extracted["filename_words"]
+    pages = extracted["pages"]
+    metadata = extracted["metadata"]
 
     old_term_counts = (
         get_document_term_counts_from_sqlite(
