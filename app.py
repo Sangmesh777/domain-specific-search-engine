@@ -1212,11 +1212,12 @@ def resolve_indexed_document(filename):
 
 def delete_indexed_document(
     safe_filename,
-    safe_path,
 ):
-    if not os.path.isfile(
-        safe_path
-    ):
+    file_path = find_document_path_in_data_folder(
+        safe_filename
+    )
+
+    if file_path is None:
         return {
             "error": "Document file not found.",
             "status_code": 404,
@@ -1224,7 +1225,7 @@ def delete_indexed_document(
 
     try:
         os.remove(
-            safe_path
+            file_path
         )
 
         incrementally_remove_document(
@@ -1412,7 +1413,6 @@ def open_document(filename):
     if request.method == "DELETE":
         result = delete_indexed_document(
             safe_filename,
-            safe_path,
         )
 
         if "error" in result:
