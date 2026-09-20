@@ -929,6 +929,11 @@ def process_uploaded_file(
         )
 
     except Exception as error:
+        print(
+            "[UPLOAD ERROR] Could not index "
+            f"{safe_filename}: {error}"
+        )
+
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
@@ -939,9 +944,7 @@ def process_uploaded_file(
             "status": "failed",
             "payload": {
                 "filename": safe_filename,
-                "reason": (
-                    f"Could not index file: {error}"
-                ),
+                "reason": "Could not index file.",
             },
         }
 
@@ -1068,10 +1071,14 @@ def delete_one_document_for_batch(
     *,
     connection,
 ):
-    file_path = os.path.join(
-        DATA_FOLDER,
-        filename,
+    file_path = resolve_document_path(
+        filename
     )
+
+    if file_path is None:
+        raise ValueError(
+            "Invalid document path."
+        )
 
     indexed_exists = (
         filename in DOCUMENT_METADATA
@@ -1136,9 +1143,14 @@ def process_bulk_delete_request(normalized_filenames):
                     )
 
             except Exception as error:
+                print(
+                    "[BULK DELETE ERROR] Could not delete "
+                    f"{filename}: {error}"
+                )
+
                 failed.append({
                     "filename": filename,
-                    "reason": str(error),
+                    "reason": "Could not delete document.",
                 })
 
         connection.commit()
