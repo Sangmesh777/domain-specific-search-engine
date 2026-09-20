@@ -1183,6 +1183,86 @@ def process_bulk_delete_request(normalized_filenames):
     }
 
 
+def resolve_indexed_document(filename):
+    safe_path = resolve_document_path(
+        filename
+    )
+
+    if safe_path is None:
+        return {
+            "error": "Invalid document path.",
+            "status_code": 400,
+        }
+
+    safe_filename = os.path.basename(
+        safe_path
+    )
+
+    if safe_filename not in DOCUMENT_METADATA:
+        return {
+            "error": "Document is not indexed.",
+            "status_code": 404,
+        }
+
+    return {
+        "safe_path": safe_path,
+        "safe_filename": safe_filename,
+    }
+
+
+def delete_indexed_document(
+    safe_filename,
+    safe_path,
+):
+    if not os.path.isfile(
+        safe_path
+    ):
+        return {
+            "error": "Document file not found.",
+            "status_code": 404,
+        }
+
+    try:
+        os.remove(
+            safe_path
+        )
+
+        incrementally_remove_document(
+            safe_filename
+        )
+
+    except Exception as error:
+        print(
+            "[DELETE ERROR] Could not delete "
+            f"{safe_filename}: {error}"
+        )
+
+        return {
+            "error": "Could not delete document.",
+            "status_code": 500,
+        }
+
+    mark_index_ready()
+
+    print(
+        "[DELETE] Removed and "
+        "incrementally unindexed: "
+        f"{safe_filename}"
+    )
+
+    return {
+        "message":
+            f"Deleted {safe_filename} successfully.",
+        "deleted":
+            safe_filename,
+        "indexing_started":
+            False,
+        "indexing":
+            get_index_status(),
+        **current_index_counts(),
+    }
+
+
 set_index_status(
     "READY",
     "Search index is ready.",
@@ -1317,85 +1397,30 @@ from search_engine.engine import search_index
     methods=["GET", "DELETE"]
 )
 def open_document(filename):
-
-    safe_path = resolve_document_path(
+    resolved = resolve_indexed_document(
         filename
     )
 
-    if safe_path is None:
+    if "error" in resolved:
         return jsonify({
-            "error":
-                "Invalid document path."
-        }), 400
+            "error": resolved["error"]
+        }), resolved["status_code"]
 
-    safe_filename = os.path.basename(
-        safe_path
-    )
-
-    if safe_filename not in DOCUMENT_METADATA:
-        return jsonify({
-            "error":
-                "Document is not indexed."
-        }), 404
+    safe_path = resolved["safe_path"]
+    safe_filename = resolved["safe_filename"]
 
     if request.method == "DELETE":
-
-        if not os.path.isfile(
-            safe_path
-        ):
-            return jsonify({
-                "error":
-                    "Document file not found."
-            }), 404
-
-        try:
-
-            os.remove(
-                safe_path
-            )
-
-            incrementally_remove_document(
-                safe_filename
-            )
-
-        except Exception as error:
-
-            return jsonify({
-                "error":
-                    f"Could not delete document: {error}"
-            }), 500
-
-        set_index_status(
-            "READY",
-            "Search index is ready.",
-            completed_at=time.time(),
-            last_error=None,
+        result = delete_indexed_document(
+            safe_filename,
+            safe_path,
         )
 
-        print(
-            "[DELETE] Removed and "
-            "incrementally unindexed: "
-            f"{safe_filename}"
-        )
+        if "error" in result:
+            return jsonify({
+                "error": result["error"]
+            }), result["status_code"]
 
-        return jsonify({
-            "message":
-                f"Deleted {safe_filename} successfully.",
-            "deleted":
-                safe_filename,
-            "documents":
-                len(DOCUMENT_METADATA),
-            "content_terms":
-                len(REAL_INVERTED_INDEX),
-            "filenames_indexed":
-                len(FILENAME_INDEX),
-            "page_text_entries":
-                len(PAGE_TEXT_INDEX),
-            "indexing_started":
-                False,
-            "indexing":
-                get_index_status(),
-        }), 200
+        return jsonify(result), 200
 
     return send_from_directory(
         DATA_FOLDER,

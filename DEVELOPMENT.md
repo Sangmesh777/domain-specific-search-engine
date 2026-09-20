@@ -703,16 +703,19 @@ it, asserted by `test_app_contains_no_sql_at_all`.
 | `upload_file` | 16 | transport: multipart parsing, empty-request validation, `jsonify` |
 | `process_bulk_delete_request` | 54 | request-local batch delete orchestration behind the route |
 | `bulk_delete_documents` | 40 | transport: JSON parsing, filename-list validation, `jsonify` |
-| `open_document` | 86 | streaming a resolved path |
+| `resolve_indexed_document` | 25 | request-local document-path/index validation behind the route |
+| `delete_indexed_document` | 51 | request-local single-delete orchestration behind the route |
+| `open_document` | 31 | transport: method dispatch, `jsonify`, file streaming |
 | `rebuild_database_background` | 64 | thread lifecycle and status |
 
 The remaining surface is now split in two. `upload_file` and
 `bulk_delete_documents` are thin route adapters, while their
 request-local orchestration lives in helpers in the same file so the
 Flask layer still owns the lock, the transaction boundaries and the
-response accounting. `open_document` and the rebuild lifecycle remain
-the last long handlers, and they are **request handling rather than
-engine logic**.
+response accounting. `open_document` now follows the same pattern, with
+path/index validation and single-delete orchestration moved behind
+helpers in `app.py`. The rebuild lifecycle is now the main remaining
+long request-handling surface rather than engine logic.
 
 `import sqlite3` and `import json` were removed from `app.py`; both are
 now unused, and a test fails if either comes back.
@@ -751,7 +754,7 @@ what turns the ranking pipeline into a callable function of an explicit
 snapshot rather than a web request. It is finished.
 
 **Step 5 is still not fully done.** The search route is a thin adapter,
-and upload / bulk-delete now delegate to request-local helpers, but the
+and upload / bulk-delete / single-delete now delegate to request-local helpers, but the
 remaining handlers still hold orchestration the storage and engine
 layers do not own:
 
@@ -759,8 +762,8 @@ layers do not own:
 | --- | --- | --- |
 | `upload_file` + `process_upload_request` | 92 | multipart validation plus filesystem writes, extraction and batch accounting |
 | `bulk_delete_documents` + `process_bulk_delete_request` | 94 | filename-list validation plus batch delete orchestration |
+| `open_document` + helpers | 107 | method dispatch, path/index validation, single-delete orchestration and file streaming |
 | `rebuild_database` | 59 | the build, the publish order and SQLite resync |
-| `open_document` | 86 | path resolution and file streaming |
 
 This is a known, bounded remainder rather than a silent gap. None of it
 is ranking or persistence logic - it is request handling that happens to
