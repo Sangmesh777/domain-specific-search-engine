@@ -1066,27 +1066,31 @@ def normalize_bulk_delete_filenames(filenames):
     return normalized_filenames
 
 
+def find_document_path_in_data_folder(filename):
+    for entry in os.scandir(DATA_FOLDER):
+        if (
+            entry.name == filename
+            and entry.is_file()
+        ):
+            return entry.path
+
+    return None
+
+
 def delete_one_document_for_batch(
     filename,
     *,
     connection,
 ):
-    file_path = resolve_document_path(
+    file_path = find_document_path_in_data_folder(
         filename
     )
-
-    if file_path is None:
-        raise ValueError(
-            "Invalid document path."
-        )
 
     indexed_exists = (
         filename in DOCUMENT_METADATA
     )
 
-    filesystem_exists = os.path.isfile(
-        file_path
-    )
+    filesystem_exists = file_path is not None
 
     if (
         not indexed_exists
