@@ -699,18 +699,20 @@ it, asserted by `test_app_contains_no_sql_at_all`.
 | `incrementally_index_document` | 111 | the lock and the transaction, over `storage.replace_document_rows` |
 | `incrementally_remove_document` | 42 | the lock and the transaction, over `storage.delete_document_rows` |
 | persistence adapters | ~160 | thin wrappers over `search_engine/storage.py` |
-| `upload_file` | 158 | request parsing, per-file staging, response building |
-| `bulk_delete_documents` | 147 | request parsing, the batch transaction, file removal |
+| `process_upload_request` | 76 | request-local upload orchestration behind the route |
+| `upload_file` | 16 | transport: multipart parsing, empty-request validation, `jsonify` |
+| `process_bulk_delete_request` | 54 | request-local batch delete orchestration behind the route |
+| `bulk_delete_documents` | 40 | transport: JSON parsing, filename-list validation, `jsonify` |
 | `open_document` | 86 | streaming a resolved path |
 | `rebuild_database_background` | 64 | thread lifecycle and status |
 
-The last four are what is left, and they are **request handling rather
-than engine logic**: their length comes from response construction,
-status bookkeeping and per-file error reporting, not from indexing or
-scoring rules. Extracting them further would create a service layer
-whose only caller is one route and which would still call back into the
-application for the lock and the incremental writer. They are recorded
-here rather than left to look finished.
+The remaining surface is now split in two. `upload_file` and
+`bulk_delete_documents` are thin route adapters, while their
+request-local orchestration lives in helpers in the same file so the
+Flask layer still owns the lock, the transaction boundaries and the
+response accounting. `open_document` and the rebuild lifecycle remain
+the last long handlers, and they are **request handling rather than
+engine logic**.
 
 `import sqlite3` and `import json` were removed from `app.py`; both are
 now unused, and a test fails if either comes back.
@@ -748,15 +750,16 @@ Step 4 is the one the Android `LocalBackend` depends on, because it is
 what turns the ranking pipeline into a callable function of an explicit
 snapshot rather than a web request. It is finished.
 
-**Step 5 is not.** The search route is now a 46-line adapter, but the
-other four handlers still hold orchestration the storage and engine
+**Step 5 is still not fully done.** The search route is a thin adapter,
+and upload / bulk-delete now delegate to request-local helpers, but the
+remaining handlers still hold orchestration the storage and engine
 layers do not own:
 
 | Handler | Lines | Still holds |
 | --- | --- | --- |
-| `upload_file` | 158 | filesystem writes, the extraction call, the incremental index call |
-| `bulk_delete_documents` | 147 | request parsing, the batch transaction, file removal |
-| `rebuild_database` | 161 | the walk, the build, the publish order |
+| `upload_file` + `process_upload_request` | 92 | multipart validation plus filesystem writes, extraction and batch accounting |
+| `bulk_delete_documents` + `process_bulk_delete_request` | 94 | filename-list validation plus batch delete orchestration |
+| `rebuild_database` | 59 | the build, the publish order and SQLite resync |
 | `open_document` | 86 | path resolution and file streaming |
 
 This is a known, bounded remainder rather than a silent gap. None of it

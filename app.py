@@ -858,6 +858,315 @@ from search_engine import indexing
 load_database()
 initialize_sqlite_store()
 
+
+def current_index_counts():
+    return {
+        "documents": len(DOCUMENT_METADATA),
+        "content_terms": len(REAL_INVERTED_INDEX),
+        "filenames_indexed": len(FILENAME_INDEX),
+        "page_text_entries": len(PAGE_TEXT_INDEX),
+    }
+
+
+def mark_index_ready():
+    set_index_status(
+        "READY",
+        "Search index is ready.",
+        completed_at=time.time(),
+        last_error=None,
+    )
+
+
+def process_uploaded_file(
+    file,
+    *,
+    connection,
+):
+    original_filename = (
+        file.filename or ""
+    ).strip()
+
+    safe_filename = sanitize_upload_filename(
+        original_filename
+    )
+
+    if not safe_filename:
+        return {
+            "status": "rejected",
+            "payload": {
+                "filename": original_filename,
+                "reason": (
+                    "Unsupported or invalid filename. "
+                    "Allowed: PDF, DOCX, TXT."
+                ),
+            },
+        }
+
+    file_path = os.path.join(
+        DATA_FOLDER,
+        safe_filename,
+    )
+
+    existed_before = os.path.isfile(
+        file_path
+    )
+
+    temp_path = file_path + ".uploading"
+
+    try:
+        file.save(temp_path)
+
+        os.replace(
+            temp_path,
+            file_path,
+        )
+
+        incrementally_index_document(
+            safe_filename,
+            file_path,
+            connection=connection,
+            commit=False,
+        )
+
+    except Exception as error:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+        return {
+            "status": "failed",
+            "payload": {
+                "filename": safe_filename,
+                "reason": (
+                    f"Could not index file: {error}"
+                ),
+            },
+        }
+
+    print(
+        "[UPLOAD] "
+        f"{'Replaced' if existed_before else 'Created'} and "
+        "incrementally indexed: "
+        f"{safe_filename}"
+    )
+
+    return {
+        "status": (
+            "replaced" if existed_before else "created"
+        ),
+        "payload": safe_filename,
+    }
+
+
+def process_upload_request(files):
+    uploaded_names = []
+    created_names = []
+    replaced_names = []
+    rejected_files = []
+    failed_files = []
+
+    connection = get_sqlite_connection()
+
+    try:
+        for file in files:
+            result = process_uploaded_file(
+                file,
+                connection=connection,
+            )
+
+            if result["status"] == "rejected":
+                rejected_files.append(
+                    result["payload"]
+                )
+                continue
+
+            if result["status"] == "failed":
+                failed_files.append(
+                    result["payload"]
+                )
+                continue
+
+            safe_filename = result["payload"]
+
+            uploaded_names.append(
+                safe_filename
+            )
+
+            if result["status"] == "replaced":
+                replaced_names.append(
+                    safe_filename
+                )
+            else:
+                created_names.append(
+                    safe_filename
+                )
+
+        connection.commit()
+
+    except Exception:
+        connection.rollback()
+        raise
+
+    finally:
+        connection.close()
+
+    mark_index_ready()
+
+    return {
+        "message": (
+            f"Processed {len(uploaded_names)} "
+            f"file"
+            f"{'s' if len(uploaded_names) != 1 else ''}: "
+            f"{len(created_names)} created, "
+            f"{len(replaced_names)} replaced."
+        ),
+        "uploaded": uploaded_names,
+        "created": created_names,
+        "replaced": replaced_names,
+        "rejected": rejected_files,
+        "failed": failed_files,
+        "uploaded_count": len(uploaded_names),
+        "created_count": len(created_names),
+        "replaced_count": len(replaced_names),
+        "rejected_count": len(rejected_files),
+        "failed_count": len(failed_files),
+        "indexing_started": False,
+        "indexing": get_index_status(),
+        **current_index_counts(),
+    }
+
+
+def normalize_bulk_delete_filenames(filenames):
+    normalized_filenames = []
+
+    for filename in filenames:
+        if not isinstance(
+            filename,
+            str
+        ):
+            continue
+
+        safe_filename = os.path.basename(
+            filename.strip()
+        )
+
+        if (
+            safe_filename
+            and safe_filename not in normalized_filenames
+        ):
+            normalized_filenames.append(
+                safe_filename
+            )
+
+    return normalized_filenames
+
+
+def delete_one_document_for_batch(
+    filename,
+    *,
+    connection,
+):
+    file_path = os.path.join(
+        DATA_FOLDER,
+        filename,
+    )
+
+    indexed_exists = (
+        filename in DOCUMENT_METADATA
+    )
+
+    filesystem_exists = os.path.isfile(
+        file_path
+    )
+
+    if (
+        not indexed_exists
+        and not filesystem_exists
+    ):
+        return {
+            "status": "not_found",
+            "payload": filename,
+        }
+
+    incrementally_remove_document(
+        filename,
+        connection=connection,
+        commit=False,
+    )
+
+    if filesystem_exists:
+        os.remove(file_path)
+
+    print(
+        "[BULK DELETE] Removed and "
+        "incrementally unindexed: "
+        f"{filename}"
+    )
+
+    return {
+        "status": "deleted",
+        "payload": filename,
+    }
+
+
+def process_bulk_delete_request(normalized_filenames):
+    deleted = []
+    not_found = []
+    failed = []
+
+    connection = get_sqlite_connection()
+
+    try:
+        for filename in normalized_filenames:
+            try:
+                result = delete_one_document_for_batch(
+                    filename,
+                    connection=connection,
+                )
+
+                if result["status"] == "deleted":
+                    deleted.append(
+                        result["payload"]
+                    )
+                else:
+                    not_found.append(
+                        result["payload"]
+                    )
+
+            except Exception as error:
+                failed.append({
+                    "filename": filename,
+                    "reason": str(error),
+                })
+
+        connection.commit()
+
+    except Exception:
+        connection.rollback()
+        raise
+
+    finally:
+        connection.close()
+
+    mark_index_ready()
+
+    return {
+        "message":
+            f"Bulk delete complete: {len(deleted)} deleted.",
+        "deleted": deleted,
+        "not_found": not_found,
+        "failed": failed,
+        "deleted_count": len(deleted),
+        "not_found_count": len(not_found),
+        "failed_count": len(failed),
+        "indexing_started": False,
+        "indexing": get_index_status(),
+        **current_index_counts(),
+    }
+
+
 set_index_status(
     "READY",
     "Search index is ready.",
@@ -911,151 +1220,9 @@ def upload_file():
             "error": "No files found"
         }), 400
 
-    uploaded_names = []
-    created_names = []
-    replaced_names = []
-    rejected_files = []
-    failed_files = []
-
-    connection = get_sqlite_connection()
-
-    try:
-        for file in files:
-
-            original_filename = (
-                file.filename or ""
-            ).strip()
-
-            safe_filename = (
-                sanitize_upload_filename(
-                    original_filename
-                )
-            )
-
-            if not safe_filename:
-
-                rejected_files.append({
-                    "filename": original_filename,
-                    "reason": (
-                        "Unsupported or invalid filename. "
-                        "Allowed: PDF, DOCX, TXT."
-                    ),
-                })
-
-                continue
-
-            file_path = os.path.join(
-                DATA_FOLDER,
-                safe_filename,
-            )
-
-            existed_before = os.path.isfile(
-                file_path
-            )
-
-            temp_path = file_path + ".uploading"
-
-            try:
-
-                file.save(temp_path)
-
-                os.replace(
-                    temp_path,
-                    file_path,
-                )
-
-                incrementally_index_document(
-                    safe_filename,
-                    file_path,
-                    connection=connection,
-                    commit=False,
-                )
-
-                uploaded_names.append(
-                    safe_filename
-                )
-
-                if existed_before:
-
-                    replaced_names.append(
-                        safe_filename
-                    )
-
-                    print(
-                        "[UPLOAD] Replaced and "
-                        "incrementally indexed: "
-                        f"{safe_filename}"
-                    )
-
-                else:
-
-                    created_names.append(
-                        safe_filename
-                    )
-
-                    print(
-                        "[UPLOAD] Created and "
-                        "incrementally indexed: "
-                        f"{safe_filename}"
-                    )
-
-            except Exception as error:
-
-                if os.path.exists(temp_path):
-                    try:
-                        os.remove(temp_path)
-                    except OSError:
-                        pass
-
-                failed_files.append({
-                    "filename": safe_filename,
-                    "reason":
-                        f"Could not index file: {error}",
-                })
-
-        connection.commit()
-
-    except Exception:
-
-        connection.rollback()
-        raise
-
-    finally:
-
-        connection.close()
-
-    set_index_status(
-        "READY",
-        "Search index is ready.",
-        completed_at=time.time(),
-        last_error=None,
-    )
-
-    return jsonify({
-        "message": (
-            f"Processed {len(uploaded_names)} "
-            f"file"
-            f"{'s' if len(uploaded_names) != 1 else ''}: "
-            f"{len(created_names)} created, "
-            f"{len(replaced_names)} replaced."
-        ),
-        "uploaded": uploaded_names,
-        "created": created_names,
-        "replaced": replaced_names,
-        "rejected": rejected_files,
-        "failed": failed_files,
-        "uploaded_count": len(uploaded_names),
-        "created_count": len(created_names),
-        "replaced_count": len(replaced_names),
-        "rejected_count": len(rejected_files),
-        "failed_count": len(failed_files),
-        "indexing_started": False,
-        "indexing": get_index_status(),
-        "documents": len(DOCUMENT_METADATA),
-        "content_terms": len(REAL_INVERTED_INDEX),
-        "filenames_indexed": len(FILENAME_INDEX),
-        "page_text_entries": len(PAGE_TEXT_INDEX),
-    }), 200
+    return jsonify(
+        process_upload_request(files)
+    ), 200
 
 
 # ============================================================
@@ -1250,27 +1417,9 @@ def bulk_delete_documents():
                 "'filenames' must be a JSON array."
         }), 400
 
-    normalized_filenames = []
-
-    for filename in filenames:
-
-        if not isinstance(
-            filename,
-            str
-        ):
-            continue
-
-        safe_filename = os.path.basename(
-            filename.strip()
-        )
-
-        if (
-            safe_filename
-            and safe_filename not in normalized_filenames
-        ):
-            normalized_filenames.append(
-                safe_filename
-            )
+    normalized_filenames = normalize_bulk_delete_filenames(
+        filenames
+    )
 
     if not normalized_filenames:
         return jsonify({
@@ -1278,100 +1427,11 @@ def bulk_delete_documents():
                 "No valid filenames supplied."
         }), 400
 
-    deleted = []
-    not_found = []
-    failed = []
-
-    connection = get_sqlite_connection()
-
-    try:
-
-        for filename in normalized_filenames:
-
-            file_path = os.path.join(
-                DATA_FOLDER,
-                filename
-            )
-
-            try:
-
-                indexed_exists = (
-                    filename in DOCUMENT_METADATA
-                )
-
-                filesystem_exists = os.path.isfile(
-                    file_path
-                )
-
-                if (
-                    not indexed_exists
-                    and not filesystem_exists
-                ):
-                    not_found.append(
-                        filename
-                    )
-                    continue
-
-                incrementally_remove_document(
-                    filename,
-                    connection=connection,
-                    commit=False,
-                )
-
-                if filesystem_exists:
-                    os.remove(file_path)
-
-                deleted.append(
-                    filename
-                )
-
-                print(
-                    "[BULK DELETE] Removed and "
-                    "incrementally unindexed: "
-                    f"{filename}"
-                )
-
-            except Exception as error:
-
-                failed.append({
-                    "filename": filename,
-                    "reason": str(error),
-                })
-
-        connection.commit()
-
-    except Exception:
-
-        connection.rollback()
-        raise
-
-    finally:
-
-        connection.close()
-
-    set_index_status(
-        "READY",
-        "Search index is ready.",
-        completed_at=time.time(),
-        last_error=None,
-    )
-
-    return jsonify({
-        "message":
-            f"Bulk delete complete: {len(deleted)} deleted.",
-        "deleted": deleted,
-        "not_found": not_found,
-        "failed": failed,
-        "deleted_count": len(deleted),
-        "not_found_count": len(not_found),
-        "failed_count": len(failed),
-        "indexing_started": False,
-        "indexing": get_index_status(),
-        "documents": len(DOCUMENT_METADATA),
-        "content_terms": len(REAL_INVERTED_INDEX),
-        "filenames_indexed": len(FILENAME_INDEX),
-        "page_text_entries": len(PAGE_TEXT_INDEX),
-    }), 200
+    return jsonify(
+        process_bulk_delete_request(
+            normalized_filenames
+        )
+    ), 200
 
 
 @app.route(
