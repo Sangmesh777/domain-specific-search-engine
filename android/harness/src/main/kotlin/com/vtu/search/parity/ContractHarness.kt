@@ -264,8 +264,8 @@ fun main() {
 
     if (report.searchBlocked) {
         println(
-            "The local engine is not implemented yet, so the search vectors " +
-                "were not replayed. Contract checks above are still authoritative.",
+            "No SearchOracle was supplied and no corpus sidecar was found, " +
+                "so the search vectors were not replayed. Contract checks above are still authoritative.",
         )
     }
 

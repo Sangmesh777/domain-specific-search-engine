@@ -54,8 +54,9 @@ than progress.
 
 1. **`android/tools/run_parity.sh`** — must print `PARITY OK`.
    Only needs a JDK.
-2. Implement the local engine and `LocalBackend`, then pass an oracle to
-   `ContractHarness.run` so the 79 search vectors are replayed too.
+2. Use the sidecar-backed `RankingEngine` replay first, then implement
+   `LocalBackend` and pass it as an oracle to `ContractHarness.run` if
+   you want adapter-level parity on top of the algorithm replay.
 3. Add the `app` module (Compose UI), compile, install, and run the
    device matrix.
 
@@ -70,7 +71,7 @@ the server is worse than no APK.
 | 10 filename-tokenizer cases | implemented, unverified |
 | 33 sanitizer cases | implemented, unverified |
 | 17 rounding cases | implemented, unverified |
-| 79 search vectors | **not run** — needs `LocalBackend` |
+| 79 search vectors | implemented, unverified — sidecar-backed replay exists, never executed here |
 
 ## Not written
 
