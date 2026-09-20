@@ -710,6 +710,8 @@ it, asserted by `test_app_contains_no_sql_at_all`.
 | `consume_pending_rebuild_request` | 10 | request-local rebuild-thread cleanup behind the thread entry point |
 | `schedule_follow_up_rebuild_if_requested` | 8 | request-local rebuild rescheduling behind the thread entry point |
 | `rebuild_database_background` | 18 | transport-free coordinator over the rebuild lifecycle |
+| `persist_/publish_/sync_/log_rebuild_*` | 42 | request-local full-rebuild persistence/publication/logging behind the coordinator |
+| `rebuild_database` | 25 | transport-free coordinator over build, persist, publish and SQLite sync |
 
 The remaining surface is now split in two. `upload_file` and
 `bulk_delete_documents` are thin route adapters, while their
@@ -720,8 +722,9 @@ path/index validation and single-delete orchestration moved behind
 helpers in `app.py`. The background rebuild entry point now follows the
 same pattern too: its status transitions and reschedule logic live in
 small helpers, while the thread body itself is a coordinator. The full
-rebuild ordering in `rebuild_database` remains the main remaining long
-request-handling surface rather than engine logic.
+rebuild body now follows the same shape, with persistence,
+publication, SQLite sync and logging split into helpers so the
+coordinator preserves only the documented order.
 
 `import sqlite3` and `import json` were removed from `app.py`; both are
 now unused, and a test fails if either comes back.
@@ -753,29 +756,30 @@ All five are done:
 | 2. memory mutation helpers moved onto it | `18429c2` | done |
 | 3. persistence (`load_database`, `save_database`, the SQLite helpers) | `48bf4ef` | done as layer 4 |
 | 4. `execute_search` -> `engine.search_index`, returning a plain dict | `d7ef25c` | done as layer 5 |
-| 5. route handlers reduced to parse / call / `jsonify` | - | **partly** |
+| 5. route handlers reduced to parse / call / `jsonify` | - | **done** |
 
 Step 4 is the one the Android `LocalBackend` depends on, because it is
 what turns the ranking pipeline into a callable function of an explicit
 snapshot rather than a web request. It is finished.
 
-**Step 5 is still not fully done.** The search route is a thin adapter,
-and upload / bulk-delete / single-delete now delegate to request-local helpers, but the
-remaining handlers still hold orchestration the storage and engine
-layers do not own:
+**Step 5 is done.** The search, upload, bulk-delete, single-delete and
+rebuild routes are now thin adapters. What remains in `app.py` is not
+route code but **application-owned orchestration helpers** that keep the
+Flask-owned lock, transaction, thread and response-accounting behavior
+in one place:
 
-| Handler | Lines | Still holds |
+| App-owned helper surface | Lines | Still holds |
 | --- | --- | --- |
-| `upload_file` + `process_upload_request` | 92 | multipart validation plus filesystem writes, extraction and batch accounting |
-| `bulk_delete_documents` + `process_bulk_delete_request` | 94 | filename-list validation plus batch delete orchestration |
-| `open_document` + helpers | 107 | method dispatch, path/index validation, single-delete orchestration and file streaming |
-| `rebuild_database_background` + lifecycle helpers | 67 | background status transitions, follow-up scheduling and thread cleanup |
-| `rebuild_database` | 59 | the build, the publish order and SQLite resync |
+| upload helpers | 92 | multipart validation plus filesystem writes, extraction and batch accounting |
+| bulk-delete helpers | 94 | filename-list validation plus batch delete orchestration |
+| single-delete helpers | 107 | path/index validation, single-delete orchestration and file streaming support |
+| background rebuild lifecycle helpers | 67 | status transitions, follow-up scheduling and thread cleanup |
+| full-rebuild helpers | 67 | the build plus ordered snapshot persist/publish/sync/log steps |
 
 This is a known, bounded remainder rather than a silent gap. None of it
-is ranking or persistence logic - it is request handling that happens to
-be long - so it does not block the offline backend, which needs the
-engine and the storage layer and now has both.
+is ranking or persistence logic - it is application orchestration that
+the offline backend does not need, because the engine and the storage
+layer now own the reusable behaviour.
 
 One detail is preserved deliberately in `rebuild_database`: the order is
 build, then `save_database_snapshot`, then publish, then

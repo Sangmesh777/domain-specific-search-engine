@@ -806,6 +806,65 @@ def queue_index_refresh():
 # recoverable.
 
 
+def snapshot_parts(snapshot):
+    return (
+        snapshot["inverted_index"],
+        snapshot["document_metadata"],
+        snapshot["filename_index"],
+        snapshot["page_text_index"],
+    )
+
+
+def persist_rebuild_snapshot(snapshot):
+    (
+        new_inverted_index,
+        new_document_metadata,
+        new_filename_index,
+        new_page_text_index,
+    ) = snapshot_parts(snapshot)
+
+    save_database_snapshot(
+        new_inverted_index,
+        new_document_metadata,
+        new_filename_index,
+        new_page_text_index,
+    )
+
+
+def publish_rebuild_snapshot(snapshot):
+    # One pointer swap: searches see old or new, never a partial build.
+    # The globals are re-pointed inside the same critical section,
+    # because execute_search captures all four of them under this lock.
+    # Re-pointing them after releasing it would let a reader capture a
+    # half-rebound set - one global from the new generation and one from
+    # the old.
+    with INDEX_DATA_LOCK:
+        publish_index_state(snapshot)
+
+    print(
+        "[REBUILD] Active snapshot swapped atomically."
+    )
+
+
+def sync_sqlite_after_rebuild():
+    with get_sqlite_connection() as connection:
+        sync_sqlite_from_memory(connection)
+
+
+def log_rebuild_completion():
+    print()
+    print(
+        f"[REBUILD] Complete: "
+        f"{len(DOCUMENT_METADATA)} documents, "
+        f"{len(REAL_INVERTED_INDEX)} content terms, "
+        f"{len(FILENAME_INDEX)} filenames indexed, "
+        f"{len(PAGE_TEXT_INDEX)} page-text entries"
+    )
+
+    print("==============================================")
+    print()
+
+
 def rebuild_database():
     """
     Build a complete new index without mutating the active snapshot.
@@ -819,52 +878,18 @@ def rebuild_database():
         DATA_FOLDER
     )
 
-    new_inverted_index = new_snapshot["inverted_index"]
-    new_document_metadata = new_snapshot["document_metadata"]
-    new_filename_index = new_snapshot["filename_index"]
-    new_page_text_index = new_snapshot["page_text_index"]
-
     # Write the full new snapshot first.
-    save_database_snapshot(
-        new_inverted_index,
-        new_document_metadata,
-        new_filename_index,
-        new_page_text_index,
+    persist_rebuild_snapshot(
+        new_snapshot
     )
 
-    # One pointer swap: searches see old or new, never a partial build.
-    # The globals are re-pointed inside the same critical section,
-    # because execute_search captures all four of them under this lock.
-    # Re-pointing them after releasing it would let a reader capture a
-    # half-rebound set - one global from the new generation and one from
-    # the old.
-    with INDEX_DATA_LOCK:
-        publish_index_state({
-            "inverted_index": new_inverted_index,
-            "document_metadata": new_document_metadata,
-            "filename_index": new_filename_index,
-            "page_text_index": new_page_text_index,
-        })
-
-    print(
-        "[REBUILD] Active snapshot swapped atomically."
+    publish_rebuild_snapshot(
+        new_snapshot
     )
 
     # Keep SQLite synchronized after an explicit full rebuild.
-    with get_sqlite_connection() as connection:
-        sync_sqlite_from_memory(connection)
-
-    print()
-    print(
-        f"[REBUILD] Complete: "
-        f"{len(DOCUMENT_METADATA)} documents, "
-        f"{len(REAL_INVERTED_INDEX)} content terms, "
-        f"{len(FILENAME_INDEX)} filenames indexed, "
-        f"{len(PAGE_TEXT_INDEX)} page-text entries"
-    )
-
-    print("==============================================")
-    print()
+    sync_sqlite_after_rebuild()
+    log_rebuild_completion()
 
 
 def resolve_document_path(filename):
