@@ -706,7 +706,10 @@ it, asserted by `test_app_contains_no_sql_at_all`.
 | `resolve_indexed_document` | 25 | request-local document-path/index validation behind the route |
 | `delete_indexed_document` | 51 | request-local single-delete orchestration behind the route |
 | `open_document` | 31 | transport: method dispatch, `jsonify`, file streaming |
-| `rebuild_database_background` | 64 | thread lifecycle and status |
+| `begin_/finish_/fail_background_rebuild` | 53 | request-local rebuild status transitions behind the thread entry point |
+| `consume_pending_rebuild_request` | 10 | request-local rebuild-thread cleanup behind the thread entry point |
+| `schedule_follow_up_rebuild_if_requested` | 8 | request-local rebuild rescheduling behind the thread entry point |
+| `rebuild_database_background` | 18 | transport-free coordinator over the rebuild lifecycle |
 
 The remaining surface is now split in two. `upload_file` and
 `bulk_delete_documents` are thin route adapters, while their
@@ -714,8 +717,11 @@ request-local orchestration lives in helpers in the same file so the
 Flask layer still owns the lock, the transaction boundaries and the
 response accounting. `open_document` now follows the same pattern, with
 path/index validation and single-delete orchestration moved behind
-helpers in `app.py`. The rebuild lifecycle is now the main remaining
-long request-handling surface rather than engine logic.
+helpers in `app.py`. The background rebuild entry point now follows the
+same pattern too: its status transitions and reschedule logic live in
+small helpers, while the thread body itself is a coordinator. The full
+rebuild ordering in `rebuild_database` remains the main remaining long
+request-handling surface rather than engine logic.
 
 `import sqlite3` and `import json` were removed from `app.py`; both are
 now unused, and a test fails if either comes back.
@@ -763,6 +769,7 @@ layers do not own:
 | `upload_file` + `process_upload_request` | 92 | multipart validation plus filesystem writes, extraction and batch accounting |
 | `bulk_delete_documents` + `process_bulk_delete_request` | 94 | filename-list validation plus batch delete orchestration |
 | `open_document` + helpers | 107 | method dispatch, path/index validation, single-delete orchestration and file streaming |
+| `rebuild_database_background` + lifecycle helpers | 67 | background status transitions, follow-up scheduling and thread cleanup |
 | `rebuild_database` | 59 | the build, the publish order and SQLite resync |
 
 This is a known, bounded remainder rather than a silent gap. None of it

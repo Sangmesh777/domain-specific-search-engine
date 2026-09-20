@@ -300,8 +300,7 @@ def get_index_status():
 INDEX_REBUILD_REQUESTED = False
 
 
-def rebuild_database_background():
-    global INDEX_THREAD
+def begin_background_rebuild():
     global INDEX_REBUILD_REQUESTED
 
     started_at = time.time()
@@ -317,53 +316,81 @@ def rebuild_database_background():
         last_error=None,
     )
 
-    try:
-        rebuild_database()
+    return started_at
 
-        completed_at = time.time()
 
-        set_index_status(
-            "READY",
-            "Search index is ready.",
-            completed_at=completed_at,
-            last_error=None,
+def finish_background_rebuild(started_at):
+    completed_at = time.time()
+
+    set_index_status(
+        "READY",
+        "Search index is ready.",
+        completed_at=completed_at,
+        last_error=None,
+    )
+
+    print(
+        "[INDEX] Background rebuild completed "
+        f"in {completed_at - started_at:.2f}s"
+    )
+
+
+def fail_background_rebuild(error):
+    completed_at = time.time()
+
+    set_index_status(
+        "ERROR",
+        "Search index rebuild failed.",
+        completed_at=completed_at,
+        last_error=str(error),
+    )
+
+    print(
+        "[INDEX ERROR] Background rebuild failed: "
+        f"{error}"
+    )
+
+
+def consume_pending_rebuild_request():
+    global INDEX_THREAD
+    global INDEX_REBUILD_REQUESTED
+
+    with INDEX_STATUS_LOCK:
+        pending_rebuild = INDEX_REBUILD_REQUESTED
+        INDEX_REBUILD_REQUESTED = False
+        INDEX_THREAD = None
+
+    return pending_rebuild
+
+
+def schedule_follow_up_rebuild_if_requested(pending_rebuild):
+    if pending_rebuild:
+        print(
+            "[INDEX] Changes arrived during rebuild; "
+            "starting follow-up rebuild."
         )
 
-        print(
-            "[INDEX] Background rebuild completed "
-            f"in {completed_at - started_at:.2f}s"
+        start_background_rebuild()
+
+
+def rebuild_database_background():
+    started_at = begin_background_rebuild()
+
+    try:
+        rebuild_database()
+        finish_background_rebuild(
+            started_at
         )
 
     except Exception as error:
-
-        completed_at = time.time()
-
-        set_index_status(
-            "ERROR",
-            "Search index rebuild failed.",
-            completed_at=completed_at,
-            last_error=str(error),
-        )
-
-        print(
-            "[INDEX ERROR] Background rebuild failed: "
-            f"{error}"
+        fail_background_rebuild(
+            error
         )
 
     finally:
-
-        with INDEX_STATUS_LOCK:
-            pending_rebuild = INDEX_REBUILD_REQUESTED
-            INDEX_REBUILD_REQUESTED = False
-            INDEX_THREAD = None
-
-        if pending_rebuild:
-            print(
-                "[INDEX] Changes arrived during rebuild; "
-                "starting follow-up rebuild."
-            )
-
-            start_background_rebuild()
+        schedule_follow_up_rebuild_if_requested(
+            consume_pending_rebuild_request()
+        )
 
 
 def start_background_rebuild():
