@@ -17,7 +17,6 @@ import tempfile
 import pytest
 import requests
 
-
 BASE_URL = "http://127.0.0.1:5000"
 PREFIX = "pytest_phase12_"
 TEST_COUNT = 5
@@ -130,26 +129,19 @@ def test_corpus(tmp_path):
 
     yield paths
 
-    bulk_delete(
-        [path.name for path in paths]
-    )
+    bulk_delete([path.name for path in paths])
 
 
 def test_batch_upload_accounting(baseline, test_corpus):
     data = status()
 
-    assert data["documents"] == (
-        baseline["documents"] + TEST_COUNT
-    )
+    assert data["documents"] == (baseline["documents"] + TEST_COUNT)
 
 
 def test_exact_token_search(test_corpus):
     result = search("uniquephase12term3")
 
-    titles = {
-        item["title"]
-        for item in result["results"]
-    }
+    titles = {item["title"] for item in result["results"]}
 
     assert f"{PREFIX}3.txt" in titles
 
@@ -157,10 +149,7 @@ def test_exact_token_search(test_corpus):
 def test_numeric_substring_search(test_corpus):
     result = search("993")
 
-    titles = {
-        item["title"]
-        for item in result["results"]
-    }
+    titles = {item["title"] for item in result["results"]}
 
     assert f"{PREFIX}3.txt" in titles
 
@@ -168,10 +157,7 @@ def test_numeric_substring_search(test_corpus):
 def test_prefix_search(test_corpus):
     result = search("uniquephase12")
 
-    titles = {
-        item["title"]
-        for item in result["results"]
-    }
+    titles = {item["title"] for item in result["results"]}
 
     assert f"{PREFIX}1.txt" in titles
     assert f"{PREFIX}5.txt" in titles
@@ -216,17 +202,11 @@ def test_incremental_replacement(test_corpus):
     assert result["failed_count"] == 0
 
     old = search("uniquephase12term3")
-    old_titles = {
-        item["title"]
-        for item in old["results"]
-    }
+    old_titles = {item["title"] for item in old["results"]}
     assert f"{PREFIX}3.txt" not in old_titles
 
     new = search("replacementuniquephase12")
-    new_titles = {
-        item["title"]
-        for item in new["results"]
-    }
+    new_titles = {item["title"] for item in new["results"]}
     assert f"{PREFIX}3.txt" in new_titles
 
 
@@ -239,10 +219,7 @@ def test_incremental_single_delete(test_corpus):
 
     result = search("replacementuniquephase12")
 
-    titles = {
-        item["title"]
-        for item in result["results"]
-    }
+    titles = {item["title"] for item in result["results"]}
 
     assert filename not in titles
 

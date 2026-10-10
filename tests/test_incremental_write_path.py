@@ -62,9 +62,7 @@ def row_counts(connection):
     """Row count per table, as a dict."""
 
     return {
-        table: connection.execute(
-            f"SELECT COUNT(*) FROM {table}"
-        ).fetchone()[0]
+        table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         for table in TABLES
     }
 
@@ -73,8 +71,7 @@ def every_term(connection):
     """All stored terms, as one string, for a `not in` assertion."""
 
     return " ".join(
-        row[0]
-        for row in connection.execute("SELECT term FROM term_postings")
+        row[0] for row in connection.execute("SELECT term FROM term_postings")
     )
 
 
@@ -199,9 +196,11 @@ def test_storage_module_is_still_flask_free():
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module.split(".")[0])
 
-    assert imported == {"json", "os", "sqlite3"}, (
-        f"search_engine/storage.py imports {sorted(imported)}"
-    )
+    assert imported == {
+        "json",
+        "os",
+        "sqlite3",
+    }, f"search_engine/storage.py imports {sorted(imported)}"
 
 
 # ----------------------------------------------------------------------
@@ -446,12 +445,16 @@ def test_deleting_an_unknown_document_is_a_silent_no_op(tmp_path):
 
     connection.commit()
 
-    assert row_counts(connection) == before == {
-        "documents": 1,
-        "term_postings": 1,
-        "filename_terms": 1,
-        "pages": 1,
-    }
+    assert (
+        row_counts(connection)
+        == before
+        == {
+            "documents": 1,
+            "term_postings": 1,
+            "filename_terms": 1,
+            "pages": 1,
+        }
+    )
 
     connection.close()
 
@@ -529,9 +532,7 @@ def test_commit_false_leaves_the_write_uncommitted_for_another_reader(tmp_path):
     # Not committed yet.
     observer = storage.get_sqlite_connection(str(tmp_path / "search.db"))
 
-    assert observer.execute(
-        "SELECT COUNT(*) FROM documents"
-    ).fetchone()[0] == 1, (
+    assert observer.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1, (
         "the delete was visible before commit, so commit=False no longer "
         "defers the write"
     )
@@ -542,9 +543,7 @@ def test_commit_false_leaves_the_write_uncommitted_for_another_reader(tmp_path):
 
     observer = storage.get_sqlite_connection(str(tmp_path / "search.db"))
 
-    assert observer.execute(
-        "SELECT COUNT(*) FROM documents"
-    ).fetchone()[0] == 0
+    assert observer.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
 
     observer.close()
     writer.close()
@@ -585,9 +584,9 @@ def test_a_batch_rolls_back_as_one_unit(tmp_path):
 
     connection.rollback()
 
-    assert row_counts(connection) == baseline, (
-        "a rolled-back batch did not restore the earlier documents"
-    )
+    assert (
+        row_counts(connection) == baseline
+    ), "a rolled-back batch did not restore the earlier documents"
 
     assert rows_for(connection, "one.txt")["term_postings"] == [("one", 1)]
     assert rows_for(connection, "two.txt")["term_postings"] == [("two", 1)]

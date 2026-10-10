@@ -37,12 +37,9 @@ def _index(doc_count, words_per_doc=40, vocab=200, seed=7):
         name: {"title": name, "path": "/tmp/" + name, "total_words": len(words)}
         for name, words in docs.items()
     }
-    filename_index = {
-        name: tokenize_filename(name.rsplit(".", 1)[0]) for name in docs
-    }
+    filename_index = {name: tokenize_filename(name.rsplit(".", 1)[0]) for name in docs}
     page_text = {
-        name: [{"page": 1, "text": " ".join(words)}]
-        for name, words in docs.items()
+        name: [{"page": 1, "text": " ".join(words)}] for name, words in docs.items()
     }
 
     return inverted, metadata, filename_index, page_text
@@ -67,13 +64,13 @@ def test_snippets_are_built_only_for_the_returned_page(monkeypatch):
         "t1", None, "10", inverted, metadata, filename_index, page_text
     )
 
-    assert response["pagination"]["total"] > 50, (
-        "the query should match many documents, or this proves nothing"
-    )
+    assert (
+        response["pagination"]["total"] > 50
+    ), "the query should match many documents, or this proves nothing"
     assert len(response["results"]) == 10
-    assert calls["count"] <= 10, (
-        f"built {calls['count']} snippets to return a 10-result page"
-    )
+    assert (
+        calls["count"] <= 10
+    ), f"built {calls['count']} snippets to return a 10-result page"
 
 
 def test_result_objects_are_built_only_for_the_returned_page(monkeypatch):
@@ -95,9 +92,9 @@ def test_result_objects_are_built_only_for_the_returned_page(monkeypatch):
     )
 
     assert response["pagination"]["total"] > 50
-    assert built["count"] <= 10, (
-        f"built {built['count']} result URLs to return a 10-result page"
-    )
+    assert (
+        built["count"] <= 10
+    ), f"built {built['count']} result URLs to return a 10-result page"
 
 
 def test_pagination_still_reports_the_full_total(monkeypatch):

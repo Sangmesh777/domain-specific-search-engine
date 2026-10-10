@@ -99,11 +99,7 @@ def load_original_helpers(base_revision=DEFAULT_BASE):
 
     tree = ast.parse(source)
 
-    present = {
-        node.name
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-    }
+    present = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
 
     missing = [name for name in ORIGINAL_NAMES if name not in present]
 
@@ -392,18 +388,18 @@ def run(base_revision=DEFAULT_BASE, limit=10):
         comparisons += 1
 
         differing = [
-            field
-            for field in CONTAINER_FIELDS
-            if expected[field] != actual[field]
+            field for field in CONTAINER_FIELDS if expected[field] != actual[field]
         ]
 
         if differing and len(state_differences) < limit:
-            state_differences.append({
-                "label": case["label"],
-                "fields": differing,
-                "expected": {field: expected[field] for field in differing},
-                "actual": {field: actual[field] for field in differing},
-            })
+            state_differences.append(
+                {
+                    "label": case["label"],
+                    "fields": differing,
+                    "expected": {field: expected[field] for field in differing},
+                    "actual": {field: actual[field] for field in differing},
+                }
+            )
 
         # The planner must not have touched its input. A planner that
         # got the right answer by mutating `current` would corrupt a
@@ -412,11 +408,13 @@ def run(base_revision=DEFAULT_BASE, limit=10):
 
         if start != before:
             if len(purity_differences) < limit:
-                purity_differences.append({
-                    "label": case["label"],
-                    "before": before,
-                    "after": start,
-                })
+                purity_differences.append(
+                    {
+                        "label": case["label"],
+                        "before": before,
+                        "after": start,
+                    }
+                )
 
     return {
         "base_revision": base_revision,
@@ -448,7 +446,9 @@ def main(argv=None):
 
     if arguments.json:
         print(json.dumps(summary, indent=2, sort_keys=True, default=str))
-        return 1 if (summary["state_differences"] or summary["purity_differences"]) else 0
+        return (
+            1 if (summary["state_differences"] or summary["purity_differences"]) else 0
+        )
 
     print(f"  cases         : {summary['cases']}")
     print(f"  comparisons   : {summary['comparisons']}")

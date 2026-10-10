@@ -177,8 +177,9 @@ def jsonify_shim(payload):
 LOCK_SHIM = _LockShim()
 
 
-def _install_containers(namespace, inverted_index, document_metadata,
-                        filename_index, page_text_index):
+def _install_containers(
+    namespace, inverted_index, document_metadata, filename_index, page_text_index
+):
     """Point the original's four globals at one snapshot."""
 
     for container, value in zip(
@@ -340,14 +341,10 @@ def load_original_functions(base_revision):
 
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in EXTRACTED:
-            segments.append(
-                ast.get_source_segment(source, node)
-            )
+            segments.append(ast.get_source_segment(source, node))
 
     missing = set(EXTRACTED) - {
-        node.name
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
+        node.name for node in tree.body if isinstance(node, ast.FunctionDef)
     }
 
     if missing:
@@ -394,10 +391,7 @@ def load_original_functions(base_revision):
 
     namespace["INDEX_DATA_LOCK"] = LOCK_SHIM
 
-    return {
-        name: namespace[name]
-        for name in EXTRACTED
-    }
+    return {name: namespace[name] for name in EXTRACTED}
 
 
 def load_extracted_functions():
@@ -409,9 +403,7 @@ def load_extracted_functions():
 
     for name, module_name in EXTRACTED.items():
         module = importlib.import_module(module_name)
-        functions[name] = getattr(
-            module, EXTRACTED_RENAMES.get(name, name)
-        )
+        functions[name] = getattr(module, EXTRACTED_RENAMES.get(name, name))
 
     return functions
 
@@ -547,10 +539,7 @@ def build_inputs():
         length = generator.randint(0, 24)
 
         inputs.append(
-            "".join(
-                chr(generator.choice(interesting))
-                for _ in range(length)
-            )
+            "".join(chr(generator.choice(interesting)) for _ in range(length))
         )
 
     return inputs
@@ -607,14 +596,16 @@ def run(base_revision=DEFAULT_BASE, limit=20):
 
             if expected_error != actual_error or expected != actual:
                 if len(differences) < limit:
-                    differences.append({
-                        "function": name,
-                        "input": value,
-                        "expected": expected,
-                        "actual": actual,
-                        "expected_error": expected_error,
-                        "actual_error": actual_error,
-                    })
+                    differences.append(
+                        {
+                            "function": name,
+                            "input": value,
+                            "expected": expected,
+                            "actual": actual,
+                            "expected_error": expected_error,
+                            "actual_error": actual_error,
+                        }
+                    )
 
     comparisons += structured_failures["comparisons"]
 
@@ -646,14 +637,16 @@ def run_structured(original_module, extracted, page_text_index, limit):
         comparisons += 1
 
         if expected != actual and len(differences) < limit:
-            differences.append({
-                "function": label,
-                "input": label,
-                "expected": expected,
-                "actual": actual,
-                "expected_error": None,
-                "actual_error": None,
-            })
+            differences.append(
+                {
+                    "function": label,
+                    "input": label,
+                    "expected": expected,
+                    "actual": actual,
+                    "expected_error": None,
+                    "actual_error": None,
+                }
+            )
 
     # --- count_phrase_occurrences -----------------------------------
     texts = [
@@ -706,11 +699,13 @@ def run_structured(original_module, extracted, page_text_index, limit):
 
     for query, page, limit_text in ENGINE_CASES:
 
-        REQUEST_SHIM.install({
-            "q": query,
-            "page": page,
-            "limit": limit_text,
-        })
+        REQUEST_SHIM.install(
+            {
+                "q": query,
+                "page": page,
+                "limit": limit_text,
+            }
+        )
 
         comparisons += 1
 
@@ -738,18 +733,20 @@ def run_structured(original_module, extracted, page_text_index, limit):
 
         if expected != actual or expected_error != actual_error:
             if len(differences) < limit:
-                differences.append({
-                    "function": "execute_search -> search_index",
-                    "input": {
-                        "q": query,
-                        "page": page,
-                        "limit": limit_text,
-                    },
-                    "expected": expected,
-                    "actual": actual,
-                    "expected_error": expected_error,
-                    "actual_error": actual_error,
-                })
+                differences.append(
+                    {
+                        "function": "execute_search -> search_index",
+                        "input": {
+                            "q": query,
+                            "page": page,
+                            "limit": limit_text,
+                        },
+                        "expected": expected,
+                        "actual": actual,
+                        "expected_error": expected_error,
+                        "actual_error": actual_error,
+                    }
+                )
 
     # --- build_paginated_response -----------------------------------
     #
@@ -758,10 +755,7 @@ def run_structured(original_module, extracted, page_text_index, limit):
     pagination_inputs = [
         [],
         [{"title": "one", "score": 1.0}],
-        [
-            {"title": "doc%d" % index, "score": float(index)}
-            for index in range(5)
-        ],
+        [{"title": "doc%d" % index, "score": float(index)} for index in range(5)],
     ]
 
     for results in pagination_inputs:
@@ -773,23 +767,23 @@ def run_structured(original_module, extracted, page_text_index, limit):
                 expected = original_module["build_paginated_response"](
                     results, page, page_size
                 )
-                actual = extracted["build_paginated_response"](
-                    results, page, page_size
-                )
+                actual = extracted["build_paginated_response"](results, page, page_size)
 
                 if expected != actual and len(differences) < limit:
-                    differences.append({
-                        "function": "build_paginated_response",
-                        "input": {
-                            "page": page,
-                            "limit": page_size,
-                            "results": len(results),
-                        },
-                        "expected": expected,
-                        "actual": actual,
-                        "expected_error": None,
-                        "actual_error": None,
-                    })
+                    differences.append(
+                        {
+                            "function": "build_paginated_response",
+                            "input": {
+                                "page": page,
+                                "limit": page_size,
+                                "results": len(results),
+                            },
+                            "expected": expected,
+                            "actual": actual,
+                            "expected_error": None,
+                            "actual_error": None,
+                        }
+                    )
 
     # --- build_snippet_result ---------------------------------------
     #
@@ -833,12 +827,8 @@ def run_structured(original_module, extracted, page_text_index, limit):
 
     for document in ("note.txt", "multi.txt", "absent.txt"):
         for words in queries:
-            expected = original_module["get_snippet_and_page"](
-                document, words
-            )
-            actual = extracted["get_snippet_and_page"](
-                page_text_index, document, words
-            )
+            expected = original_module["get_snippet_and_page"](document, words)
+            actual = extracted["get_snippet_and_page"](page_text_index, document, words)
 
             compare_call(
                 f"get_snippet_and_page({document}, {words})",
@@ -864,9 +854,7 @@ def run_structured(original_module, extracted, page_text_index, limit):
     compare_call(
         "get_snippet_and_page(missing document)",
         original_module["get_snippet_and_page"]("absent.txt", ["alpha"]),
-        extracted["get_snippet_and_page"](
-            page_text_index, "absent.txt", ["alpha"]
-        ),
+        extracted["get_snippet_and_page"](page_text_index, "absent.txt", ["alpha"]),
     )
 
     return {"comparisons": comparisons, "differences": differences}
@@ -910,13 +898,15 @@ def main(argv=None):
         print("-" * 62)
 
         for difference in summary["differences"]:
+            print(f"{difference['function']}({difference['input']!r})")
             print(
-                f"{difference['function']}({difference['input']!r})"
+                f"    original  : {difference['expected']!r} "
+                f"{difference['expected_error'] or ''}"
             )
-            print(f"    original  : {difference['expected']!r} "
-                  f"{difference['expected_error'] or ''}")
-            print(f"    extracted : {difference['actual']!r} "
-                  f"{difference['actual_error'] or ''}")
+            print(
+                f"    extracted : {difference['actual']!r} "
+                f"{difference['actual_error'] or ''}"
+            )
 
         print()
         print("SHADOW PARITY FAILED")

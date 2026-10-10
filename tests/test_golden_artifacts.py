@@ -50,8 +50,7 @@ def test_vector_file_has_expected_shape(vectors):
 
 def test_vector_ids_are_unique(vectors):
     identifiers = [
-        vector["id"]
-        for vector in vectors["vectors"] + vectors["empty_corpus_vectors"]
+        vector["id"] for vector in vectors["vectors"] + vectors["empty_corpus_vectors"]
     ]
 
     duplicates = sorted(
@@ -87,9 +86,9 @@ def test_result_objects_never_expose_server_paths(vectors):
         results = response if isinstance(response, list) else response["results"]
 
         for result in results:
-            assert "path" not in result, (
-                f"vector {vector['id']} leaked a server filesystem path"
-            )
+            assert (
+                "path" not in result
+            ), f"vector {vector['id']} leaked a server filesystem path"
 
 
 def test_contract_vectors_match_the_engine(vectors):
@@ -137,10 +136,7 @@ def test_contract_vectors_match_the_engine(vectors):
     for case in contract["parse_filetype_filter"]:
         query, filetype = app.parse_filetype_filter(case["input"])
 
-        if (
-            query != case["expected_query"]
-            or filetype != case["expected_filetype"]
-        ):
+        if query != case["expected_query"] or filetype != case["expected_filetype"]:
             failures.append(
                 f"parse_filetype_filter({case['input']!r}) "
                 f"expected ({case['expected_query']!r}, "
@@ -174,16 +170,16 @@ def test_character_class_vectors_match_python(vectors):
     for entry in classes["alnum"]:
         character = chr(int(entry["codepoint"][2:], 16))
 
-        assert character.isalnum() is entry["isalnum"], (
-            f"{entry['codepoint']} isalnum mismatch"
-        )
+        assert (
+            character.isalnum() is entry["isalnum"]
+        ), f"{entry['codepoint']} isalnum mismatch"
 
     for entry in classes["whitespace"]:
         character = chr(int(entry["codepoint"][2:], 16))
 
-        assert character.isspace() is entry["isspace"], (
-            f"{entry['codepoint']} isspace mismatch"
-        )
+        assert (
+            character.isspace() is entry["isspace"]
+        ), f"{entry['codepoint']} isspace mismatch"
 
 
 def test_blank_query_shape_is_pinned(vectors):

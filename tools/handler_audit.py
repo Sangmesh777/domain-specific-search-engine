@@ -83,11 +83,7 @@ HANDLERS = (
 
 
 def functions_by_name(tree):
-    return {
-        node.name: node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-    }
+    return {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
 
 
 def called_names(node):
@@ -148,9 +144,7 @@ def main():
         calls = called_names(node)
 
         engine = sorted(
-            (call, ENGINE_FUNCTIONS[call])
-            for call in calls
-            if call in ENGINE_FUNCTIONS
+            (call, ENGINE_FUNCTIONS[call]) for call in calls if call in ENGINE_FUNCTIONS
         )
         storage = sorted(
             (call, STORAGE_FUNCTIONS[call])
@@ -158,9 +152,7 @@ def main():
             if call in STORAGE_FUNCTIONS
         )
         app_level = sorted(
-            (call, APP_FUNCTIONS[call])
-            for call in calls
-            if call in APP_FUNCTIONS
+            (call, APP_FUNCTIONS[call]) for call in calls if call in APP_FUNCTIONS
         )
 
         http = sorted(call for call in calls if call.split(".")[0] in HTTP_NAMES)

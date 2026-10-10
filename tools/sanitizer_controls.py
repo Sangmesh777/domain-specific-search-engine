@@ -50,20 +50,20 @@ CONTROLS = [
     ),
     (
         "join whitespace runs with nothing instead of an underscore",
-        '''"_".join(filename.split())''',
-        '''"".join(filename.split())''',
+        """"_".join(filename.split())""",
+        """"".join(filename.split())""",
         "observable",
     ),
     (
         "remove the dot from the allowed character class",
-        '''_FILENAME_ASCII_STRIP_RE = re.compile(r"[^A-Za-z0-9_.-]")''',
-        '''_FILENAME_ASCII_STRIP_RE = re.compile(r"[^A-Za-z0-9_-]")''',
+        """_FILENAME_ASCII_STRIP_RE = re.compile(r"[^A-Za-z0-9_.-]")""",
+        """_FILENAME_ASCII_STRIP_RE = re.compile(r"[^A-Za-z0-9_-]")""",
         "observable",
     ),
     (
         "remove the hyphen from the allowed character class",
-        '''_FILENAME_ASCII_STRIP_RE = re.compile(r"[^A-Za-z0-9_.-]")''',
-        '''_FILENAME_ASCII_STRIP_RE = re.compile(r"[^A-Za-z0-9_.]")''',
+        """_FILENAME_ASCII_STRIP_RE = re.compile(r"[^A-Za-z0-9_.-]")""",
+        """_FILENAME_ASCII_STRIP_RE = re.compile(r"[^A-Za-z0-9_.]")""",
         "observable",
     ),
     (
@@ -137,9 +137,7 @@ def run_suite():
         text=True,
     )
 
-    lines = [
-        line for line in result.stdout.strip().splitlines() if line.strip()
-    ]
+    lines = [line for line in result.stdout.strip().splitlines() if line.strip()]
 
     summary = lines[-1] if lines else "<no output>"
 
@@ -171,9 +169,7 @@ def main():
     for index, (name, old, new, observability) in enumerate(CONTROLS, start=1):
 
         if original.count(old) != 1:
-            print(
-                f"[{index}] ANCHOR MISSING x{original.count(old)}: {name}"
-            )
+            print(f"[{index}] ANCHOR MISSING x{original.count(old)}: {name}")
             failures.append(name)
             continue
 

@@ -52,142 +52,166 @@ def _adversarial_corpus():
         cases.append(f"a{chr(code)}b.txt")
 
     # Path shapes: both separators, traversal, absolute and mixed.
-    cases.extend([
-        "a/b.txt",
-        "a\\b.txt",
-        "dir/sub/file.txt",
-        "dir\\sub\\file.txt",
-        "..\\..\\etc\\passwd.txt",
-        "../../../etc/passwd.txt",
-        "/etc/passwd.txt",
-        "C:\\Users\\me\\report.pdf",
-        "\\\\server\\share\\doc.docx",
-        "dir\\..\\..\\x.txt",
-        "\\leading.txt",
-        "trailing\\",
-        "/",
-        "\\",
-        "//",
-        "\\\\",
-        "a//b.txt",
-        "a\\\\b.txt",
-    ])
+    cases.extend(
+        [
+            "a/b.txt",
+            "a\\b.txt",
+            "dir/sub/file.txt",
+            "dir\\sub\\file.txt",
+            "..\\..\\etc\\passwd.txt",
+            "../../../etc/passwd.txt",
+            "/etc/passwd.txt",
+            "C:\\Users\\me\\report.pdf",
+            "\\\\server\\share\\doc.docx",
+            "dir\\..\\..\\x.txt",
+            "\\leading.txt",
+            "trailing\\",
+            "/",
+            "\\",
+            "//",
+            "\\\\",
+            "a//b.txt",
+            "a\\\\b.txt",
+        ]
+    )
 
     # Leading dot files and dot-only names: the `.strip("._")` tail.
-    cases.extend([
-        ".hidden.txt",
-        "..",
-        ".",
-        "...",
-        "....txt",
-        "._.txt",
-        "_leading.txt",
-        "trailing_",
-        "trailing..txt",
-        ".-_.-_.txt",
-        ".",
-        "__init__.py",
-    ])
+    cases.extend(
+        [
+            ".hidden.txt",
+            "..",
+            ".",
+            "...",
+            "....txt",
+            "._.txt",
+            "_leading.txt",
+            "trailing_",
+            "trailing..txt",
+            ".-_.-_.txt",
+            ".",
+            "__init__.py",
+        ]
+    )
 
     # Whitespace handling: `split()` collapses runs to underscores.
-    cases.extend([
-        "  spaced  .txt",
-        "tab\there.txt",
-        "new\nline.txt",
-        "carriage\rreturn.txt",
-        "vertical\x0btab.txt",
-        "form\x0cfeed.txt",
-        "many       spaces.txt",
-        " \t\n\r\x0b\x0c ",
-        "a\u00a0b.txt",
-        "a\u2003b.txt",
-        "a\u3000b.txt",
-    ])
+    cases.extend(
+        [
+            "  spaced  .txt",
+            "tab\there.txt",
+            "new\nline.txt",
+            "carriage\rreturn.txt",
+            "vertical\x0btab.txt",
+            "form\x0cfeed.txt",
+            "many       spaces.txt",
+            " \t\n\r\x0b\x0c ",
+            "a\u00a0b.txt",
+            "a\u2003b.txt",
+            "a\u3000b.txt",
+        ]
+    )
 
     # NFKD cases: decomposable characters, combining marks, ligatures,
     # fullwidth forms, and characters that decompose to nothing.
-    cases.extend([
-        "Ünïcödé Ñämé.docx",
-        "i contain cool ümläuts.txt",
-        "ünïcödé_ñämé.PDF",
-        "ﬁle.txt",
-        "①one.txt",
-        "ｆｕｌｌｗｉｄｔｈ.txt",
-        "half½.txt",
-        "ÅÄÖ åäö.txt",
-        "e\u0301acute.txt",
-        "İstanbul.txt",
-        "ß.txt",
-        "æøå.txt",
-        "emoji\U0001f600.txt",
-        "cjk\u4e2d\u6587.txt",
-        "rtl\u05d0\u05d1.txt",
-        "\ufeffbom.txt",
-        "zero\u200bwidth.txt",
-    ])
+    cases.extend(
+        [
+            "Ünïcödé Ñämé.docx",
+            "i contain cool ümläuts.txt",
+            "ünïcödé_ñämé.PDF",
+            "ﬁle.txt",
+            "①one.txt",
+            "ｆｕｌｌｗｉｄｔｈ.txt",
+            "half½.txt",
+            "ÅÄÖ åäö.txt",
+            "e\u0301acute.txt",
+            "İstanbul.txt",
+            "ß.txt",
+            "æøå.txt",
+            "emoji\U0001f600.txt",
+            "cjk\u4e2d\u6587.txt",
+            "rtl\u05d0\u05d1.txt",
+            "\ufeffbom.txt",
+            "zero\u200bwidth.txt",
+        ]
+    )
 
     # Windows device names, in the case forms that must be caught.
-    for stem in ("CON", "PRN", "AUX", "NUL", "COM1", "COM9", "LPT1", "LPT9",
-                 "CONIN$", "CONOUT$"):
+    for stem in (
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "COM9",
+        "LPT1",
+        "LPT9",
+        "CONIN$",
+        "CONOUT$",
+    ):
         cases.append(f"{stem}.txt")
         cases.append(f"{stem.lower()}.txt")
         cases.append(stem)
         cases.append(f"{stem}.pdf")
 
     # Extensions the caller accepts or rejects.
-    cases.extend([
-        "file.pdf",
-        "file.PDF",
-        "file.PdF",
-        "file.docx",
-        "file.txt",
-        "file.TXT",
-        "file.exe",
-        "no_extension",
-        "name.pdf.exe",
-        ".pdf",
-        "pdf",
-        "file.pdf.docx",
-        "file.docx.pdf",
-    ])
+    cases.extend(
+        [
+            "file.pdf",
+            "file.PDF",
+            "file.PdF",
+            "file.docx",
+            "file.txt",
+            "file.TXT",
+            "file.exe",
+            "no_extension",
+            "name.pdf.exe",
+            ".pdf",
+            "pdf",
+            "file.pdf.docx",
+            "file.docx.pdf",
+        ]
+    )
 
     # Length: long repeats and single very long runs.
-    cases.extend([
-        "x" * 300 + ".txt",
-        ("ünïcödé" * 40) + ".pdf",
-        ("a." * 100) + "txt",
-        " " * 200 + ".txt",
-        "." * 200,
-        "_" * 200,
-    ])
+    cases.extend(
+        [
+            "x" * 300 + ".txt",
+            ("ünïcödé" * 40) + ".pdf",
+            ("a." * 100) + "txt",
+            " " * 200 + ".txt",
+            "." * 200,
+            "_" * 200,
+        ]
+    )
 
     # Miscellaneous punctuation soup.
-    cases.extend([
-        "a!b.txt",
-        "semi;colon.txt",
-        "quote'quote.txt",
-        'dq"dq.txt',
-        "pipe|pipe.txt",
-        "back`tick.txt",
-        "star*.txt",
-        "question?.txt",
-        "lt<gt>.txt",
-        "colon:name.txt",
-        "brace{s}.txt",
-        "bracket[s].txt",
-        "paren(s).txt",
-        "plus+plus.txt",
-        "equals=equals.txt",
-        "at@sign.txt",
-        "hash#hash.txt",
-        "dollar$dollar.txt",
-        "percent%percent.txt",
-        "caret^caret.txt",
-        "tilde~tilde.txt",
-        "amp&and.txt",
-        "comma,comma.txt",
-        "bang!.pdf",
-    ])
+    cases.extend(
+        [
+            "a!b.txt",
+            "semi;colon.txt",
+            "quote'quote.txt",
+            'dq"dq.txt',
+            "pipe|pipe.txt",
+            "back`tick.txt",
+            "star*.txt",
+            "question?.txt",
+            "lt<gt>.txt",
+            "colon:name.txt",
+            "brace{s}.txt",
+            "bracket[s].txt",
+            "paren(s).txt",
+            "plus+plus.txt",
+            "equals=equals.txt",
+            "at@sign.txt",
+            "hash#hash.txt",
+            "dollar$dollar.txt",
+            "percent%percent.txt",
+            "caret^caret.txt",
+            "tilde~tilde.txt",
+            "amp&and.txt",
+            "comma,comma.txt",
+            "bang!.pdf",
+        ]
+    )
 
     # Every printable ASCII string of length 1 and 2 appended to a name,
     # to catch ordering mistakes in the collapse-then-strip pipeline.
@@ -225,13 +249,9 @@ def test_transcription_matches_werkzeug_on_the_whole_corpus():
 
     for case in CASES:
 
-        expected = reference(
-            case
-        )
+        expected = reference(case)
 
-        actual = _secure_filename(
-            case
-        )
+        actual = _secure_filename(case)
 
         if actual != expected:
             divergences.append((case, expected, actual))
@@ -249,18 +269,12 @@ def test_the_public_sanitizer_matches_werkzeug_on_the_whole_corpus():
 
     for case in CASES:
 
-        expected = reference(
-            os.path.basename(case)
-        )
+        expected = reference(os.path.basename(case))
 
-        if not expected.lower().endswith(
-            (".pdf", ".docx", ".txt")
-        ):
+        if not expected.lower().endswith((".pdf", ".docx", ".txt")):
             expected = ""
 
-        actual = sanitize_upload_filename(
-            case
-        )
+        actual = sanitize_upload_filename(case)
 
         if actual != expected:
             divergences.append((case, expected, actual))
@@ -293,9 +307,7 @@ def test_the_windows_branch_is_exercised_in_a_clean_interpreter():
 
     assert result.returncode == 0, result.stdout + result.stderr
 
-    report = json.loads(
-        result.stdout[: result.stdout.index("}") + 1]
-    )
+    report = json.loads(result.stdout[: result.stdout.index("}") + 1])
 
     assert report["divergences"] == 0, report["first_divergences"]
 

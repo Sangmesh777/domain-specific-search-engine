@@ -161,9 +161,7 @@ def main(argv):
 
     elif command == "list":
         result = {
-            "documents": sorted(
-                engine.DOCUMENT_METADATA.keys()
-            ),
+            "documents": sorted(engine.DOCUMENT_METADATA.keys()),
         }
 
     else:

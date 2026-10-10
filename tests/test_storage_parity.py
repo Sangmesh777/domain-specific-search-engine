@@ -40,11 +40,7 @@ def source_of(path):
 
 def toplevel_functions(path):
     tree = ast.parse(source_of(path))
-    return {
-        node.name: node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-    }
+    return {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
 
 
 # ----------------------------------------------------------------------
@@ -93,9 +89,9 @@ def test_storage_parity_holds_for_adversarial_fixtures():
         "empty-corpus",
     )
 
-    assert completed.returncode == 0, (
-        f"storage parity failed:\n{completed.stdout[-4000:]}"
-    )
+    assert (
+        completed.returncode == 0
+    ), f"storage parity failed:\n{completed.stdout[-4000:]}"
 
     assert "differences    : 0" in completed.stdout
 
@@ -113,9 +109,9 @@ def test_the_comparator_detects_every_deliberate_corruption():
         "empty-corpus",
     )
 
-    assert completed.returncode == 0, (
-        f"negative control failed:\n{completed.stdout[-4000:]}"
-    )
+    assert (
+        completed.returncode == 0
+    ), f"negative control failed:\n{completed.stdout[-4000:]}"
 
     assert "NEGATIVE CONTROL OK" in completed.stdout
 
@@ -141,10 +137,7 @@ def test_the_restart_comparison_is_relaxed_only_for_filename_order():
     assert "restart comparison ignores filename order: as intended" in (
         completed.stdout
     )
-    assert (
-        "strict comparison still catches a filename reorder: yes"
-        in completed.stdout
-    )
+    assert "strict comparison still catches a filename reorder: yes" in completed.stdout
 
 
 # ----------------------------------------------------------------------
@@ -235,14 +228,12 @@ def test_reconstruction_functions_return_a_snapshot_without_installing_it():
                 called = (
                     function.attr
                     if isinstance(function, ast.Attribute)
-                    else function.id
-                    if isinstance(child.func, ast.Name)
-                    else None
+                    else function.id if isinstance(child.func, ast.Name) else None
                 )
 
-                assert called != "publish_index_state", (
-                    f"{name} publishes state; storage must not"
-                )
+                assert (
+                    called != "publish_index_state"
+                ), f"{name} publishes state; storage must not"
 
 
 # ----------------------------------------------------------------------
@@ -287,8 +278,7 @@ def test_app_no_longer_contains_the_persistence_logic(marker):
     """Every statement the storage layer owns should now live there."""
 
     assert marker not in source_of(APP_PATH), (
-        f"app.py still contains {marker!r}; it belongs in "
-        "search_engine/storage.py"
+        f"app.py still contains {marker!r}; it belongs in " "search_engine/storage.py"
     )
 
 
@@ -336,13 +326,9 @@ def test_storage_layer_owns_every_write_statement():
 
     source = source_of(STORAGE_PATH)
 
-    missing = [
-        marker for marker in SQL_OWNED_BY_STORAGE if marker not in source
-    ]
+    missing = [marker for marker in SQL_OWNED_BY_STORAGE if marker not in source]
 
-    assert not missing, (
-        f"search_engine/storage.py no longer contains {missing}"
-    )
+    assert not missing, f"search_engine/storage.py no longer contains {missing}"
 
 
 def test_app_does_not_import_sqlite():

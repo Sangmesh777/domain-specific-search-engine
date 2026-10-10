@@ -398,9 +398,7 @@ def _function_sources(source, path):
         start = node.lineno - 1
 
         if node.decorator_list:
-            start = min(
-                decorator.lineno for decorator in node.decorator_list
-            ) - 1
+            start = min(decorator.lineno for decorator in node.decorator_list) - 1
 
         # end_lineno is inclusive and 1-based.
         end = node.end_lineno
@@ -505,20 +503,21 @@ def plan_extraction(source):
         for name in spec.get("constants", []):
             if name not in constants:
                 raise ExtractionError(
-                    f"{name!r} is not a module-level literal constant in "
-                    "app.py"
+                    f"{name!r} is not a module-level literal constant in " "app.py"
                 )
 
             start, end, text = constants[name]
 
-            operations.append({
-                "module": relative_path,
-                "function": name,
-                "kind": "constant",
-                "start": start,
-                "end": end,
-                "text": text,
-            })
+            operations.append(
+                {
+                    "module": relative_path,
+                    "function": name,
+                    "kind": "constant",
+                    "start": start,
+                    "end": end,
+                    "text": text,
+                }
+            )
 
         # A function can be deleted from app.py without being written
         # into the new module, because its replacement is a wrapper that
@@ -532,14 +531,16 @@ def plan_extraction(source):
 
             start, end, text = functions[name]
 
-            operations.append({
-                "module": relative_path,
-                "function": name,
-                "kind": "replaced",
-                "start": start,
-                "end": end,
-                "text": text,
-            })
+            operations.append(
+                {
+                    "module": relative_path,
+                    "function": name,
+                    "kind": "replaced",
+                    "start": start,
+                    "end": end,
+                    "text": text,
+                }
+            )
 
         for name in spec["functions"]:
             if name not in functions:
@@ -551,13 +552,15 @@ def plan_extraction(source):
 
             start, end, text = functions[name]
 
-            operations.append({
-                "module": relative_path,
-                "function": name,
-                "start": start,
-                "end": end,
-                "text": text,
-            })
+            operations.append(
+                {
+                    "module": relative_path,
+                    "function": name,
+                    "start": start,
+                    "end": end,
+                    "text": text,
+                }
+            )
 
     return operations
 
@@ -602,13 +605,7 @@ def apply_transform(name, text):
 
     if parameter:
         opening = text.index("(")
-        text = (
-            text[: opening + 1]
-            + "\n    "
-            + parameter
-            + ","
-            + text[opening + 1 :]
-        )
+        text = text[: opening + 1] + "\n    " + parameter + "," + text[opening + 1 :]
 
     # Rename module globals to the new parameters.
     for old_name, new_name in transform.get("rename_names", {}).items():
@@ -635,8 +632,7 @@ def render_module(relative_path, spec, sources, names, constants=()):
         parts.append("\n" + text.rstrip("\n") + "\n\n\n")
 
     body = "\n\n\n".join(
-        apply_transform(name, text).rstrip("\n")
-        for name, text in zip(names, sources)
+        apply_transform(name, text).rstrip("\n") for name, text in zip(names, sources)
     )
 
     parts.append(body + "\n")
@@ -762,8 +758,7 @@ def apply_extraction(dry_run=False):
     # build_removal_plan here would re-check the filesystem and skip
     # every module, because the modules were just written.
     removals = sorted(
-        (operation["start"], operation["end"])
-        for operation in operations
+        (operation["start"], operation["end"]) for operation in operations
     )
 
     removed = set()
@@ -772,55 +767,42 @@ def apply_extraction(dry_run=False):
         for index in range(start, end):
             removed.add(index)
 
-    kept = [
-        line
-        for index, line in enumerate(lines)
-        if index not in removed
-    ]
+    kept = [line for index, line in enumerate(lines) if index not in removed]
 
     # Insert the imports where the tokenizers used to live, so the file
     # keeps its original structure.
     first_removal = removals[0][0]
     adjusted = first_removal
 
-    moved = {
-        operation["function"]
-        for operation in operations
-    }
+    moved = {operation["function"] for operation in operations}
 
     import_block = "\n"
 
     if "extract_text" in moved:
         import_block += (
-        "from search_engine.extract import (\n"
-        "    count_phrase_occurrences,\n"
-        "    extract_pages,\n"
-        "    extract_text,\n"
-        ")\n"
+            "from search_engine.extract import (\n"
+            "    count_phrase_occurrences,\n"
+            "    extract_pages,\n"
+            "    extract_text,\n"
+            ")\n"
         )
 
     if "get_snippet_and_page" in moved:
         import_block += (
-        "from search_engine.snippet import (\n"
-        "    build_snippet_result,\n"
-        "    get_snippet_and_page,\n"
-        ")\n"
+            "from search_engine.snippet import (\n"
+            "    build_snippet_result,\n"
+            "    get_snippet_and_page,\n"
+            ")\n"
         )
 
     if "rebuild_database" in moved:
-        import_block += (
-        "from search_engine import indexing\n"
-        )
+        import_block += "from search_engine import indexing\n"
 
     if "execute_search" in moved:
-        import_block += (
-        "from search_engine.engine import search_index\n"
-        )
+        import_block += "from search_engine.engine import search_index\n"
 
     if "sync_sqlite_from_memory" in moved:
-        import_block += (
-        "from search_engine import storage\n"
-        )
+        import_block += "from search_engine import storage\n"
 
     import_block += "\n"
 
@@ -831,10 +813,7 @@ def apply_extraction(dry_run=False):
     # Derive the wrapper modules from the operations already computed.
     # Re-checking the filesystem here would skip every module, because
     # the module files were written earlier in this same run.
-    wrapper_modules = {
-        operation["module"]
-        for operation in operations
-    }
+    wrapper_modules = {operation["module"] for operation in operations}
 
     wrappers = ""
 

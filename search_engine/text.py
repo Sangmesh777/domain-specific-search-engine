@@ -6,23 +6,18 @@ Do not retype these functions: the bodies must stay byte
 identical to the engine that the golden vectors pin.
 """
 
+
 def tokenize(text):
     """Tokenize normal document content."""
 
     text = text.lower()
 
     cleaned_text = "".join(
-        character
-        if character.isalnum() or character.isspace()
-        else " "
+        character if character.isalnum() or character.isspace() else " "
         for character in text
     )
 
-    return [
-        word
-        for word in cleaned_text.split()
-        if len(word) > 1
-    ]
+    return [word for word in cleaned_text.split() if len(word) > 1]
 
 
 def tokenize_filename(text):
@@ -34,17 +29,11 @@ def tokenize_filename(text):
     text = text.lower()
 
     cleaned_text = "".join(
-        character
-        if character.isalnum() or character.isspace()
-        else " "
+        character if character.isalnum() or character.isspace() else " "
         for character in text
     )
 
-    return [
-        word
-        for word in cleaned_text.split()
-        if word
-    ]
+    return [word for word in cleaned_text.split() if word]
 
 
 def normalize_search_query(query):
@@ -72,30 +61,20 @@ def normalize_search_query(query):
 
     # Handle a quoted query such as:
     # "BCS502 Module 2.pdf"
-    quote_wrapped = (
-        len(query) >= 2
-        and query.startswith('"')
-        and query.endswith('"')
-    )
+    quote_wrapped = len(query) >= 2 and query.startswith('"') and query.endswith('"')
 
     if quote_wrapped:
         query = query[1:-1].strip()
 
     lower_query = query.lower()
 
-    supported_extensions = (
-        ".pdf",
-        ".docx",
-        ".txt"
-    )
+    supported_extensions = (".pdf", ".docx", ".txt")
 
     for extension in supported_extensions:
 
         if lower_query.endswith(extension):
 
-            query = query[
-                :-len(extension)
-            ].rstrip()
+            query = query[: -len(extension)].rstrip()
 
             break
 
@@ -135,28 +114,20 @@ def parse_filetype_filter(query):
 
         quoted_suffix = f'{extension}"'
 
-        if query.lower().endswith(
-            quoted_suffix
-        ):
+        if query.lower().endswith(quoted_suffix):
             return (
-                query[
-                    :-len(quoted_suffix)
-                ].rstrip() + '"'
-                if query[
-                    :-len(quoted_suffix)
-                ].rstrip()
-                else "",
+                (
+                    query[: -len(quoted_suffix)].rstrip() + '"'
+                    if query[: -len(quoted_suffix)].rstrip()
+                    else ""
+                ),
                 filetype,
             )
 
-        if query.lower().endswith(
-            extension
-        ):
+        if query.lower().endswith(extension):
 
             return (
-                query[
-                    :-len(extension)
-                ].rstrip(),
+                query[: -len(extension)].rstrip(),
                 filetype,
             )
 
@@ -187,9 +158,7 @@ def parse_filetype_filter(query):
         if normalized in supported_types:
 
             if detected_type is None:
-                detected_type = supported_types[
-                    normalized
-                ]
+                detected_type = supported_types[normalized]
 
             continue
 

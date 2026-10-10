@@ -245,8 +245,7 @@ def test_the_build_installs_nothing(tmp_path, app_module):
     )
 
     assert before == after, (
-        "building a snapshot mutated the live index; the build must not "
-        "publish"
+        "building a snapshot mutated the live index; the build must not " "publish"
     )
 
 
@@ -273,9 +272,7 @@ def test_a_real_document_resolves(tmp_path):
     folder = tmp_path / "corpus"
     path = write(folder, "note.txt", "alpha\n")
 
-    assert indexing.resolve_document_path(folder, "note.txt") == str(
-        path.resolve()
-    )
+    assert indexing.resolve_document_path(folder, "note.txt") == str(path.resolve())
 
 
 def test_traversal_out_of_the_folder_is_refused(tmp_path):
@@ -344,9 +341,7 @@ def test_the_indexing_module_holds_no_application_state():
         "PAGE_TEXT_INDEX",
         "DATA_FOLDER",
     ):
-        assert name not in loaded, (
-            f"search_engine/indexing.py reads {name!r}"
-        )
+        assert name not in loaded, f"search_engine/indexing.py reads {name!r}"
 
 
 def test_app_no_longer_builds_an_index():
@@ -359,9 +354,7 @@ def test_app_no_longer_builds_an_index():
         "os.listdir(DATA_FOLDER)",
         "supported_extensions",
     ):
-        assert marker not in source, (
-            f"app.py still contains the build logic {marker!r}"
-        )
+        assert marker not in source, f"app.py still contains the build logic {marker!r}"
 
 
 def test_the_adapter_keeps_the_publish_order():
@@ -418,13 +411,11 @@ def test_the_publish_happens_under_the_lock():
 
     locked = [text for text in blocks if "INDEX_DATA_LOCK" in text]
 
-    assert len(locked) == 1, (
-        f"expected exactly one locked section, found {len(locked)}"
-    )
+    assert len(locked) == 1, f"expected exactly one locked section, found {len(locked)}"
 
-    assert "publish_index_state" in locked[0], (
-        "the snapshot is published outside INDEX_DATA_LOCK"
-    )
+    assert (
+        "publish_index_state" in locked[0]
+    ), "the snapshot is published outside INDEX_DATA_LOCK"
 
 
 # ----------------------------------------------------------------------

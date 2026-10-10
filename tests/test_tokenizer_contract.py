@@ -52,10 +52,10 @@ CONTENT_TOKENIZE_CASES = [
     ("under_score-dash", ["under", "score", "dash"]),
     ("tab\there", ["tab", "here"]),
     # Every Unicode whitespace that Python accepts must split tokens.
-    ("no\u00a0break", ["no", "break"]),          # NO-BREAK SPACE
+    ("no\u00a0break", ["no", "break"]),  # NO-BREAK SPACE
     ("figure\u2007space", ["figure", "space"]),  # FIGURE SPACE
     ("narrow\u202fspace", ["narrow", "space"]),  # NARROW NO-BREAK SPACE
-    ("next\u0085line", ["next", "line"]),        # NEXT LINE
+    ("next\u0085line", ["next", "line"]),  # NEXT LINE
     ("break\u00a0", ["break"]),
     # U+200B is neither alphanumeric nor whitespace in Python, so it is
     # replaced by a separator even though Java calls it not-whitespace.
@@ -121,9 +121,9 @@ def test_whitespace_classification_matches_python():
     not_whitespace = ["\u200b", "\u0307", "a", "½"]
 
     for character in not_whitespace:
-        assert not character.isspace(), (
-            f"U+{ord(character):04X} should not be whitespace"
-        )
+        assert (
+            not character.isspace()
+        ), f"U+{ord(character):04X} should not be whitespace"
 
 
 def test_alnum_classification_matches_python():

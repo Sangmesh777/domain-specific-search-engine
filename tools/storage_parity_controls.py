@@ -81,9 +81,7 @@ def apply_patch(path, old, new, label, expected=1):
 
     before = digest(path)
 
-    path.write_text(
-        text.replace(old, new, expected), encoding="utf-8"
-    )
+    path.write_text(text.replace(old, new, expected), encoding="utf-8")
 
     if digest(path) == before:
         raise ControlNotApplied("the patch matched but changed nothing")
@@ -145,15 +143,15 @@ def replacement_merges():
 def delete_skips_tokens():
     apply_patch(
         STORAGE,
-        '''    connection.execute(
+        """    connection.execute(
         "DELETE FROM filename_terms WHERE filename = ?",
         (filename,),
     )
 
     connection.execute(
-        "DELETE FROM pages WHERE filename = ?",''',
-        '''    connection.execute(
-        "DELETE FROM pages WHERE filename = ?",''',
+        "DELETE FROM pages WHERE filename = ?",""",
+        """    connection.execute(
+        "DELETE FROM pages WHERE filename = ?",""",
         label="delete skips tokens",
     )
 
@@ -162,10 +160,10 @@ def delete_skips_tokens():
 def replacement_sorts_tokens():
     apply_patch(
         STORAGE,
-        '''            for position, term
-            in enumerate(filename_words)''',
-        '''            for position, term
-            in enumerate(sorted(filename_words))''',
+        """            for position, term
+            in enumerate(filename_words)""",
+        """            for position, term
+            in enumerate(sorted(filename_words))""",
         label="replacement sorts tokens",
     )
 
@@ -174,15 +172,15 @@ def replacement_sorts_tokens():
 def delete_skips_pages():
     apply_patch(
         STORAGE,
-        '''    connection.execute(
+        """    connection.execute(
         "DELETE FROM pages WHERE filename = ?",
         (filename,),
     )
 
     connection.execute(
-        "DELETE FROM documents WHERE filename = ?",''',
-        '''    connection.execute(
-        "DELETE FROM documents WHERE filename = ?",''',
+        "DELETE FROM documents WHERE filename = ?",""",
+        """    connection.execute(
+        "DELETE FROM documents WHERE filename = ?",""",
         label="delete skips pages",
     )
 
@@ -222,15 +220,15 @@ def build_keeps_empty_documents():
 def reindex_is_a_noop():
     apply_patch(
         PROBE,
-        '''    for name in names:
+        """    for name in names:
         try:
             incrementally_index_document(
                 name, str(Path(corpus_dir) / name)
             )
-            reindexed.append(name)''',
-        '''    for name in names:
+            reindexed.append(name)""",
+        """    for name in names:
         try:
-            reindexed.append(name)''',
+            reindexed.append(name)""",
         label="re-index is a no-op",
     )
 
@@ -239,8 +237,8 @@ def reindex_is_a_noop():
 def bulk_delete_deletes_nothing():
     apply_patch(
         PROBE,
-        '''        json={"filenames": list(names)},''',
-        '''        json={"filenames": []},''',
+        """        json={"filenames": list(names)},""",
+        """        json={"filenames": []},""",
         label="bulk delete deletes nothing",
     )
 
@@ -268,9 +266,7 @@ def main():
 
             print(f"  {summary}")
 
-            results.append(
-                (name, "detected" if returncode != 0 else "NOT DETECTED")
-            )
+            results.append((name, "detected" if returncode != 0 else "NOT DETECTED"))
 
     finally:
         snapshot.restore()

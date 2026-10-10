@@ -96,10 +96,10 @@ TRANSFORMS = {
             # strings so the original `try`/`except` parsing below is
             # reached unchanged - including the fallback on a bad value.
             [
-                '    raw_query = request.args.get(\n'
+                "    raw_query = request.args.get(\n"
                 '        "q",\n'
                 '        ""\n'
-                '    ).strip()',
+                "    ).strip()",
                 "    raw_query = raw_query_text.strip()",
             ],
             [
@@ -131,11 +131,11 @@ TRANSFORMS = {
             # inputs the body used to take from `request` and from the
             # four module globals.
             [
-                '@app.route(\n'
+                "@app.route(\n"
                 '    "/api/search",\n'
                 '    methods=["GET"]\n'
-                ')\n'
-                'def execute_search():\n',
+                ")\n"
+                "def execute_search():\n",
                 "def execute_search(\n"
                 "    raw_query_text,\n"
                 "    page_text,\n"

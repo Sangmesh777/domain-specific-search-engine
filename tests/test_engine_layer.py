@@ -180,9 +180,7 @@ def test_engine_holds_no_module_globals(name):
 
     names = loaded_names(ast.parse(source_of(ENGINE_PATH)))
 
-    assert name not in names, (
-        f"search_engine/engine.py reads the global {name!r}"
-    )
+    assert name not in names, f"search_engine/engine.py reads the global {name!r}"
 
 
 def test_engine_module_has_no_module_level_state():
@@ -194,8 +192,7 @@ def test_engine_module_has_no_module_level_state():
 
     for node in tree.body:
         assert isinstance(node, allowed), (
-            f"unexpected module-level {type(node).__name__} at line "
-            f"{node.lineno}"
+            f"unexpected module-level {type(node).__name__} at line " f"{node.lineno}"
         )
 
 
@@ -207,9 +204,7 @@ def test_app_no_longer_holds_the_ranking_pipeline():
     tree = ast.parse(source)
 
     functions = {
-        node.name: node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
+        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
     }
 
     assert "execute_search" in functions
@@ -229,9 +224,9 @@ def test_app_no_longer_holds_the_ranking_pipeline():
         "final_score",
         "ranked_documents",
     ):
-        assert marker not in source, (
-            f"app.py still contains the ranking logic {marker!r}"
-        )
+        assert (
+            marker not in source
+        ), f"app.py still contains the ranking logic {marker!r}"
 
 
 def test_the_adapter_is_the_only_caller_of_the_engine():
@@ -241,9 +236,7 @@ def test_the_adapter_is_the_only_caller_of_the_engine():
         node.name
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef)
-        and "search_index(" in (
-            ast.get_source_segment(source_of(APP_PATH), node) or ""
-        )
+        and "search_index(" in (ast.get_source_segment(source_of(APP_PATH), node) or "")
     }
 
     assert callers == {"execute_search"}, f"unexpected callers: {callers}"
@@ -268,11 +261,7 @@ def test_the_adapter_captures_the_snapshot_under_the_lock():
         if isinstance(node, ast.FunctionDef) and node.name == "execute_search"
     )
 
-    locks = [
-        node
-        for node in ast.walk(adapter)
-        if isinstance(node, ast.With)
-    ]
+    locks = [node for node in ast.walk(adapter) if isinstance(node, ast.With)]
 
     assert len(locks) == 1, "expected exactly one lock acquisition"
 
@@ -286,9 +275,7 @@ def test_the_adapter_captures_the_snapshot_under_the_lock():
         "FILENAME_INDEX",
         "PAGE_TEXT_INDEX",
     ):
-        assert container in with_source, (
-            f"{container} is not captured under the lock"
-        )
+        assert container in with_source, f"{container} is not captured under the lock"
 
 
 def test_the_route_still_decorates_the_adapter():
@@ -302,15 +289,13 @@ def test_the_route_still_decorates_the_adapter():
         if isinstance(node, ast.FunctionDef) and node.name == "execute_search"
     )
 
-    decorators = [
-        ast.unparse(decorator) for decorator in adapter.decorator_list
-    ]
+    decorators = [ast.unparse(decorator) for decorator in adapter.decorator_list]
 
     # `ast.unparse` normalises quoting, so compare with it normalised
     # on both sides rather than assuming the source's style.
-    assert any("/api/search" in text for text in decorators), (
-        f"the search route moved: {decorators}"
-    )
+    assert any(
+        "/api/search" in text for text in decorators
+    ), f"the search route moved: {decorators}"
 
 
 # ----------------------------------------------------------------------
@@ -378,13 +363,9 @@ def test_the_directory_walk_lives_in_the_indexing_layer():
     """Rebuilding a folder is the indexing layer's job, not a route's."""
 
     for marker in ("os.listdir", "supported_extensions"):
-        assert marker not in source_of(APP_PATH), (
-            f"app.py contains {marker!r}"
-        )
+        assert marker not in source_of(APP_PATH), f"app.py contains {marker!r}"
 
-    assert "os.listdir" in source_of(
-        REPO_ROOT / "search_engine" / "indexing.py"
-    )
+    assert "os.listdir" in source_of(REPO_ROOT / "search_engine" / "indexing.py")
 
 
 def test_the_background_handler_only_schedules():

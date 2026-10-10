@@ -78,18 +78,12 @@ class IndexState:
     ):
         self._lock = threading.RLock()
 
-        self._inverted_index = (
-            inverted_index if inverted_index is not None else {}
-        )
+        self._inverted_index = inverted_index if inverted_index is not None else {}
         self._document_metadata = (
             document_metadata if document_metadata is not None else {}
         )
-        self._filename_index = (
-            filename_index if filename_index is not None else {}
-        )
-        self._page_text_index = (
-            page_text_index if page_text_index is not None else {}
-        )
+        self._filename_index = filename_index if filename_index is not None else {}
+        self._page_text_index = page_text_index if page_text_index is not None else {}
 
         self._generation = 0
 
@@ -177,11 +171,7 @@ class IndexState:
         exactly as it was.
         """
 
-        missing = [
-            field
-            for field in REQUIRED_SNAPSHOT_FIELDS
-            if field not in snapshot
-        ]
+        missing = [field for field in REQUIRED_SNAPSHOT_FIELDS if field not in snapshot]
 
         if missing:
             raise SnapshotIncompleteError(
@@ -275,11 +265,7 @@ class IndexState:
 def _containers_from(current):
     """Validate a snapshot mapping and return its four containers."""
 
-    missing = [
-        field
-        for field in REQUIRED_SNAPSHOT_FIELDS
-        if field not in current
-    ]
+    missing = [field for field in REQUIRED_SNAPSHOT_FIELDS if field not in current]
 
     if missing:
         raise SnapshotIncompleteError(
@@ -322,9 +308,7 @@ def plan_add_document(
     previously indexed terms.
     """
 
-    inverted, metadata_index, filename_index, page_index = _containers_from(
-        current
-    )
+    inverted, metadata_index, filename_index, page_index = _containers_from(current)
 
     new_inverted = dict(inverted)
     new_metadata = dict(metadata_index)
@@ -358,9 +342,7 @@ def plan_remove_document(current, filename, old_term_counts):
     replacement containers.
     """
 
-    inverted, metadata_index, filename_index, page_index = _containers_from(
-        current
-    )
+    inverted, metadata_index, filename_index, page_index = _containers_from(current)
 
     new_inverted = dict(inverted)
     new_metadata = dict(metadata_index)
@@ -412,9 +394,7 @@ def plan_upsert_document(
     postings behind.
     """
 
-    inverted, metadata_index, filename_index, page_index = _containers_from(
-        current
-    )
+    inverted, metadata_index, filename_index, page_index = _containers_from(current)
 
     new_inverted = dict(inverted)
     new_metadata = dict(metadata_index)

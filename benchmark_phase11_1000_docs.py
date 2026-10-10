@@ -6,7 +6,6 @@ from pathlib import Path
 
 import requests
 
-
 BASE_URL = "http://127.0.0.1:5000"
 BENCH_PREFIX = "bench_phase11_"
 FILE_COUNT = 1000
@@ -14,10 +13,11 @@ SEARCH_RUNS = 20
 
 
 def api_json(method, url, **kwargs):
+    kwargs.setdefault("timeout", 120)
+
     response = requests.request(
         method,
         url,
-        timeout=120,
         **kwargs,
     )
     response.raise_for_status()
@@ -84,6 +84,30 @@ def upload_files(paths):
             handle.close()
 
 
+def cleanup_benchmark_documents():
+    """
+    Delete any benchmark documents left behind by an interrupted run.
+    """
+    deleted = 0
+
+    for index in range(1, FILE_COUNT + 2):
+        filename = f"{BENCH_PREFIX}{index:04d}.txt"
+
+        try:
+            response = requests.delete(
+                f"{BASE_URL}/api/documents/{filename}",
+                timeout=30,
+            )
+
+            if response.status_code == 200:
+                deleted += 1
+
+        except Exception:
+            pass
+
+    return deleted
+
+
 def delete_file(filename):
     started = time.perf_counter()
 
@@ -106,24 +130,14 @@ def main():
     print("\n[1/6] Checking server...")
     baseline = get_status()
 
-    print(
-        f"Documents before benchmark : "
-        f"{baseline.get('documents')}"
-    )
+    print(f"Documents before benchmark : " f"{baseline.get('documents')}")
 
-    print(
-        f"Content terms before       : "
-        f"{baseline.get('content_terms')}"
-    )
+    print(f"Content terms before       : " f"{baseline.get('content_terms')}")
 
     if baseline.get("documents") is None:
-        raise RuntimeError(
-            "Unexpected /api/status response."
-        )
+        raise RuntimeError("Unexpected /api/status response.")
 
-    with tempfile.TemporaryDirectory(
-        prefix="phase11_benchmark_"
-    ) as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="phase11_benchmark_") as temp_dir:
 
         temp_path = Path(temp_dir)
 
@@ -135,11 +149,7 @@ def main():
 
         for index in range(1, FILE_COUNT + 1):
 
-            path = (
-                temp_path
-                /
-                f"{BENCH_PREFIX}{index:04d}.txt"
-            )
+            path = temp_path / f"{BENCH_PREFIX}{index:04d}.txt"
 
             path.write_text(
                 (
@@ -153,47 +163,26 @@ def main():
 
             paths.append(path)
 
-        generation_time = (
-            time.perf_counter()
-            - started
-        )
+        generation_time = time.perf_counter() - started
 
-        print(
-            f"Generated {len(paths)} files in "
-            f"{generation_time:.3f}s"
-        )
+        print(f"Generated {len(paths)} files in " f"{generation_time:.3f}s")
 
         print("\n[3/6] Uploading 1000 files...")
         print(
-            "This is intentionally a real API test; "
-            "the benchmark may take a while."
+            "This is intentionally a real API test; " "the benchmark may take a while."
         )
 
-        upload_data, batch_upload_time = upload_files(
-            paths
-        )
+        upload_data, batch_upload_time = upload_files(paths)
 
-        print(
-            f"Batch upload/index time: "
-            f"{batch_upload_time:.3f}s"
-        )
+        print(f"Batch upload/index time: " f"{batch_upload_time:.3f}s")
 
-        print(
-            f"Uploaded count          : "
-            f"{upload_data.get('uploaded_count')}"
-        )
+        print(f"Uploaded count          : " f"{upload_data.get('uploaded_count')}")
 
-        print(
-            f"Created count           : "
-            f"{upload_data.get('created_count')}"
-        )
+        print(f"Created count           : " f"{upload_data.get('created_count')}")
 
         after_batch = get_status()
 
-        print(
-            f"Documents after batch   : "
-            f"{after_batch.get('documents')}"
-        )
+        print(f"Documents after batch   : " f"{after_batch.get('documents')}")
 
         print("\n[4/6] Testing search latency...")
 
@@ -208,23 +197,16 @@ def main():
 
         for run_index in range(SEARCH_RUNS):
 
-            query = queries[
-                run_index % len(queries)
-            ]
+            query = queries[run_index % len(queries)]
 
             data, elapsed = search(query)
 
             timings.append(elapsed)
 
             if not data.get("results"):
-                raise RuntimeError(
-                    f"Benchmark search returned no results: {query}"
-                )
+                raise RuntimeError(f"Benchmark search returned no results: {query}")
 
-        median_ms = (
-            statistics.median(timings)
-            * 1000
-        )
+        median_ms = statistics.median(timings) * 1000
 
         p95_ms = (
             statistics.quantiles(
@@ -235,30 +217,17 @@ def main():
             * 1000
         )
 
-        max_ms = (
-            max(timings)
-            * 1000
-        )
+        max_ms = max(timings) * 1000
 
-        print(
-            f"Search median : {median_ms:.2f} ms"
-        )
+        print(f"Search median : {median_ms:.2f} ms")
 
-        print(
-            f"Search p95    : {p95_ms:.2f} ms"
-        )
+        print(f"Search p95    : {p95_ms:.2f} ms")
 
-        print(
-            f"Search max    : {max_ms:.2f} ms"
-        )
+        print(f"Search max    : {max_ms:.2f} ms")
 
         print("\n[5/6] Testing ONE additional upload...")
 
-        single_path = (
-            temp_path
-            /
-            f"{BENCH_PREFIX}1001.txt"
-        )
+        single_path = temp_path / f"{BENCH_PREFIX}1001.txt"
 
         single_path.write_text(
             (
@@ -269,21 +238,13 @@ def main():
             encoding="utf-8",
         )
 
-        _, single_upload_time = upload_files(
-            [single_path]
-        )
+        _, single_upload_time = upload_files([single_path])
 
         after_single = get_status()
 
-        print(
-            f"Single-file upload/index time: "
-            f"{single_upload_time:.3f}s"
-        )
+        print(f"Single-file upload/index time: " f"{single_upload_time:.3f}s")
 
-        print(
-            f"Documents after single upload : "
-            f"{after_single.get('documents')}"
-        )
+        print(f"Documents after single upload : " f"{after_single.get('documents')}")
 
         print("\n[6/6] Cleaning up benchmark documents...")
 
@@ -296,23 +257,16 @@ def main():
             FILE_COUNT + 2,
         ):
 
-            filename = (
-                f"{BENCH_PREFIX}{index:04d}.txt"
-            )
+            filename = f"{BENCH_PREFIX}{index:04d}.txt"
 
             delete_file(filename)
 
             deleted += 1
 
             if deleted % 100 == 0:
-                print(
-                    f"Deleted {deleted}/{FILE_COUNT + 1}"
-                )
+                print(f"Deleted {deleted}/{FILE_COUNT + 1}")
 
-        cleanup_time = (
-            time.perf_counter()
-            - cleanup_started
-        )
+        cleanup_time = time.perf_counter() - cleanup_started
 
         final_status = get_status()
 
@@ -320,40 +274,19 @@ def main():
     print("BENCHMARK RESULT")
     print("=" * 72)
 
-    print(
-        f"Batch index 1000 docs : "
-        f"{batch_upload_time:.3f}s"
-    )
+    print(f"Batch index 1000 docs : " f"{batch_upload_time:.3f}s")
 
-    print(
-        f"Single new document   : "
-        f"{single_upload_time:.3f}s"
-    )
+    print(f"Single new document   : " f"{single_upload_time:.3f}s")
 
-    print(
-        f"Search median         : "
-        f"{median_ms:.2f} ms"
-    )
+    print(f"Search median         : " f"{median_ms:.2f} ms")
 
-    print(
-        f"Search p95            : "
-        f"{p95_ms:.2f} ms"
-    )
+    print(f"Search p95            : " f"{p95_ms:.2f} ms")
 
-    print(
-        f"Cleanup {FILE_COUNT + 1} docs  : "
-        f"{cleanup_time:.3f}s"
-    )
+    print(f"Cleanup {FILE_COUNT + 1} docs  : " f"{cleanup_time:.3f}s")
 
-    print(
-        f"Final documents       : "
-        f"{final_status.get('documents')}"
-    )
+    print(f"Final documents       : " f"{final_status.get('documents')}")
 
-    print(
-        f"Final content terms  : "
-        f"{final_status.get('content_terms')}"
-    )
+    print(f"Final content terms  : " f"{final_status.get('content_terms')}")
 
     print("\nIMPORTANT:")
     print(
@@ -363,4 +296,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    if "--cleanup-only" in sys.argv:
+        print(f"Deleted benchmark documents: " f"{cleanup_benchmark_documents()}")
+    else:
+        main()
