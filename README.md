@@ -1,49 +1,17 @@
 # Domain-Specific Search Engine
 
-A document search engine with one ranking contract and two execution
-modes:
+A document search engine with one ranking contract, an extracted
+transport-independent core, and a Flask API in front of it.
 
 ```text
-                         SEARCH ENGINE
-                              │
-               ┌──────────────┴──────────────┐
-               │                             │
-          ONLINE MODE                  OFFLINE MODE
-               │                             │
-          Flask/API                    Android APK
-               │                             │
-        RemoteBackend                  LocalBackend
-               │                             │
-         Server SQLite               Android SQLite
-         Server files                Local app files
-         Server index                Local index
+                          SEARCH ENGINE
+                               │
+                           Flask/API
+                               │
+                   search_engine core (no HTTP)
+                               │
+                     SQLite store + server index
 ```
-
-The online half works today. **The offline half is specified but not
-built**, because no Android toolchain exists in the environment where
-this work was done. See [Status](#status) for exactly what is real.
-
-## Status
-
-| Area | State | Evidence |
-| --- | --- | --- |
-| Flask search API | **Working** | 448 tests pass with the server running |
-| `search_engine/` extraction | **Done** | 5 layers; app.py 4085 -> 1571 lines; engine and storage are Flask-free and parity-proven. Route handlers other than search are still long (see DEVELOPMENT.md) |
-| Ranking engine | **Working** | 79/79 golden vectors, exact binary64 |
-| React web UI | **Working** | builds cleanly; live search verified through the proxy |
-| Test suite | **Working** | 448 pass with a server; 439 pass + 9 skip without one |
-| Shadow parity gate | **Working** | 12 functions, 21,454 comparisons, 0 differences |
-| Memory mutation coherence | **Closed** | copy-on-write publish; 20 tests, all 5 negative controls confirmed |
-| Persistence extraction | **Done** | app.py holds no SQL; 324,500 values compared vs monolith, 0 differences, 8/8 controls detected |
-| Filename order across restart | **Fixed** | explicit `position` column; 8/8 hash seeds keep the order; corrupt databases self-repair at startup |
-| JVM semantics | **Verified** | real JVM: 0 genuine divergences, rounding exact |
-| Golden vector gate | **Working** | catches drift; proven by negative control |
-| Corpus sidecar | **Generated** | 13 documents, 191 terms, integrity hash verified |
-| Android app | **Not built** | no JDK, no SDK, no Gradle; no APK |
-| Android parity core | **Uncompiled** | algorithms verified; Kotlin syntax never compiled |
-| Cross-mode parity | **Not run** | needs `LocalBackend` |
-
-There is no APK. Any claim of one would be false.
 
 ## What it does
 
@@ -58,6 +26,20 @@ highlights. It combines:
 * phrase scoring for multi-word and quoted queries
 * `pdf` / `docx` / `txt` filetype filtering
 * pagination
+
+## Status
+
+| Area | State | Evidence |
+| --- | --- | --- |
+| Flask search API | **Working** | 291 tests pass without a server; 9 more run against one |
+| `search_engine/` extraction | **Done** | 5 layers; `app.py` 4085 → 1448 lines; the engine and storage layers are Flask-free and parity-proven |
+| Ranking engine | **Working** | 79/79 golden vectors, exact binary64 |
+| React web UI | **Working** | builds cleanly; live search verified through the proxy |
+| Shadow parity gate | **Working** | 12 functions, 21,454 comparisons, 0 differences |
+| Memory mutation coherence | **Closed** | copy-on-write publish; 20 tests, all 5 negative controls confirmed |
+| Persistence extraction | **Done** | `app.py` holds no SQL; 324,500 values compared vs the monolith, 0 differences, 8/8 controls detected |
+| Filename order across restart | **Fixed** | explicit `position` column; 8/8 hash seeds keep the order; corrupt databases self-repair at startup |
+| Golden vector gate | **Working** | catches drift; proven by a negative control |
 
 ## Running it
 
@@ -137,8 +119,8 @@ Do not normalise these into one shape. Clients depend on them.
 ./run_tests.sh
 ```
 
-That runs the byte-compile check, the golden vector gate, the sidecar
-integrity check and the pytest suite.
+That runs the byte-compile check, the golden vector gate and the pytest
+suite.
 
 ```bash
 python3 -m pytest -q          # just the suite
@@ -149,8 +131,8 @@ explicit reason** rather than failing, so the suite is always
 meaningful:
 
 ```text
-with a server     : 448 passed
-without a server  : 439 passed, 9 skipped
+with a server     : 300 passed
+without a server  : 291 passed, 9 skipped
 ```
 
 ## Verifying the search contract
@@ -161,15 +143,12 @@ python3 -m tools.verify_golden_vectors
 
 # Regenerate the vectors (byte-identical across runs)
 python3 -m tools.generate_golden_vectors
-
-# Rebuild the Android corpus sidecar
-python3 -m tools.build_corpus_sidecar
 ```
 
 `tests/golden/search_engine_vectors.json` contains 79 complete search
 responses and 122 contract cases covering tokenizer, sanitizer, query
-parsing and rounding semantics. It is the specification the Android port
-must satisfy.
+parsing and rounding semantics. It is the specification the engine must
+satisfy.
 
 ## Layout
 
@@ -182,55 +161,40 @@ tools/
   engine_session.py          Isolated-engine bootstrap shared by tools
   generate_golden_vectors.py Records the vectors
   verify_golden_vectors.py   The parity gate
-  build_corpus_sidecar.py    Builds the Android bootstrap artifact
-  port_model.py              Executable model of the Kotlin ports
   extract_modules.py         Slices modules out of app.py by AST line range
+  engine_extraction_spec.py  The ranking layer's extraction spec
+  indexing_extraction_spec.py  The indexing layer's extraction spec
   storage_extraction_spec.py The persistence layer's extraction spec
   shadow_parity.py           Extracted functions vs the originals
   mutation_equivalence.py    Copy-on-write planners vs the in-place helpers
   storage_probe.py           Dumps one engine session for comparison
   storage_equivalence.py     Reconstruction parity vs the monolith
   storage_parity_controls.py Proves the parity gate can fail
+  sanitizer_controls.py      Negative controls for the sanitizer transcription
+  sanitizer_windows_check.py The Windows branch, under a simulated nt host
+  handler_audit.py           Route-handler size audit
+  measure_snapshot_cost.py   Snapshot cost measurement
 tests/
   test_phase12_live.py       Live HTTP regression suite
   test_tokenizer_contract.py Unicode, sanitizer and query contracts
-  test_golden_artifacts.py   Artifact integrity
   test_golden_vectors.py     Full vector replay
+  test_golden_artifacts.py   Golden vector integrity
   test_restart_recovery.py   Restart, bulk delete and rebuild
-  test_port_model.py         Verifies the Kotlin port algorithms
+  test_core_is_transport_free.py  The core runs with the web stack absent
+  test_engine_layer.py       Transport independence of the ranking core
+  test_indexing_layer.py     Document layout and index building
   test_index_state.py        Index ownership and torn-read guards
   test_memory_mutation_atomicity.py  Copy-on-write publication and its AST guards
   test_storage_parity.py     Reconstruction parity and transport independence
   test_filename_order_persistence.py  Filename token order across a restart
   test_incremental_write_path.py  The extracted single-document write path
-  test_engine_layer.py       Transport independence of the ranking core
-  test_indexing_layer.py     Document layout and index building
+  test_sanitizer_independence.py  The sanitizer needs no web stack
   test_shadow_parity.py      Guards the shadow-parity function set
-  test_jvm_semantics.py      JVM semantics behind the Kotlin port
   golden/                    The golden vectors
-artifacts/android/
-  corpus_sidecar.json        Extracted corpus for the Android bootstrap
 frontend/                    React + Vite web UI
-android/                     Android port: specification and harness
 run_tests.sh                 Full verification gate
-```
-
-## Android
-
-See [ANDROID.md](ANDROID.md) for the port specification and
-[android/README.md](android/README.md) for the module layout.
-
-The short version: the parity-critical algorithms are written, the rest
-is specified, and none of it has been compiled. The harness module is
-deliberately Android-free so that parity can be verified with only a
-JDK, before the Android SDK is involved.
-
-```bash
-android/tools/run_parity.sh    # needs a JDK
 ```
 
 ## Documentation
 
 * [DEVELOPMENT.md](DEVELOPMENT.md) — architecture and development workflow
-* [ANDROID.md](ANDROID.md) — Android port specification
-* [android/README.md](android/README.md) — Android module layout

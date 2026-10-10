@@ -5,8 +5,7 @@ This is the parity gate. It runs the full vector replay in a fresh
 interpreter, because the engine resolves its data directory at import
 time and a subprocess is the only way to guarantee a clean index.
 
-The same vectors are consumed by the Android harness, so a failure
-here means the Python side has drifted away from the published
+A failure here means the engine has drifted away from the published
 contract.
 """
 

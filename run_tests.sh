@@ -13,16 +13,7 @@
 #   5. the storage reconstruction parity gate
 #   6. the negative controls for that gate, which prove it can fail
 #   7. the negative controls for the sanitizer transcription
-#   8. the port-coverage report
-#   9. the corpus sidecar integrity check
-#  10. the complete pytest suite
-#
-# There is an eleventh step that is deliberately absent: nothing here
-# compiles the Kotlin under android/. No javac, kotlinc, gradle or
-# Android SDK exists in this environment and their hosts are
-# unreachable, so the Kotlin has never been compiled. See
-# ACCEPTANCE_REPORT.md and run `python3 -m tools.port_gap` for what the
-# Python-side model does and does not stand in for.
+#   8. the complete pytest suite
 #
 # Steps 6 and 7 exist because a parity gate that cannot fail is worse
 # than no gate: it reports success. They were missing from this script
@@ -109,58 +100,6 @@ if python3 -m tools.sanitizer_windows_check; then
     echo "windows branch OK"
 else
     echo "windows branch FAILED"
-    failures=$((failures + 1))
-fi
-
-step "Port coverage (what the model reproduces, and what it does not)"
-if python3 -m tools.port_gap; then
-    echo "port coverage OK"
-else
-    echo "port coverage FAILED (a modelled section no longer matches the contract)"
-    failures=$((failures + 1))
-fi
-
-step "Corpus sidecar integrity"
-if python3 - <<'PY'
-import hashlib
-import json
-import sys
-from pathlib import Path
-
-path = Path("artifacts/android/corpus_sidecar.json")
-
-if not path.exists():
-    print("sidecar is missing")
-    sys.exit(1)
-
-sidecar = json.loads(path.read_text(encoding="utf-8"))
-
-payload = {k: v for k, v in sidecar.items() if k != "integrity"}
-serialized = json.dumps(
-    payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")
-)
-calculated = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-
-if calculated != sidecar["integrity"]["canonical_json_sha256"]:
-    print("sidecar integrity hash mismatch")
-    sys.exit(1)
-
-documents = sidecar["documents"]
-terms = {t for d in documents for t in d["content_terms"]}
-
-if len(terms) != sidecar["corpus_totals"]["content_terms"]:
-    print("sidecar content term total mismatch")
-    sys.exit(1)
-
-print(
-    f"sidecar OK: {len(documents)} documents, "
-    f"{len(terms)} content terms"
-)
-PY
-then
-    echo "sidecar OK"
-else
-    echo "sidecar FAILED"
     failures=$((failures + 1))
 fi
 

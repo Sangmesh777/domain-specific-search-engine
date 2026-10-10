@@ -2,7 +2,7 @@
 Golden corpus definition.
 
 This module is the single source of truth for the corpus used by the
-golden-vector harness and by the Android corpus sidecar.
+golden-vector harness.
 
 The corpus is deliberately small (13 documents) but is designed so that
 every ranking dimension in the engine is exercised by at least one

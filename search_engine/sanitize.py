@@ -21,8 +21,9 @@ them would change stored document names:
   so a Windows host sanitizes a backslash differently from a POSIX one;
 * `os.name == "nt"` gates the device-name check.
 
-The Kotlin port must reproduce the POSIX answers, because that is what
-the shipped engine produces on its deployment platform.
+The shipped engine runs on POSIX, so the POSIX answers are the ones
+that matter; the Windows branch is exercised separately by
+`tools/sanitizer_windows_check.py`.
 """
 
 import os

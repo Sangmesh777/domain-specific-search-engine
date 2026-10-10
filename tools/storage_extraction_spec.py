@@ -33,9 +33,9 @@ globals, and of any knowledge of how published state is swapped. It
 reads and writes files and rows; the caller decides what to do with the
 result.
 
-The split matters for the offline mode. The Android backend needs the
-same schema and the same reconstruction rules, and it can only reuse
-them if none of this reaches back into the web application.
+The split matters because the same schema and the same reconstruction
+rules must be reusable without any of this reaching back into the web
+application.
 
 Two invariants are load-bearing and easy to break by accident:
 

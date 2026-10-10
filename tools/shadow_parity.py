@@ -36,7 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 VECTORS_PATH = REPO_ROOT / "tests" / "golden" / "search_engine_vectors.json"
 
 # The revision whose app.py holds the pre-extraction definitions.
-DEFAULT_BASE = "7895064"
+DEFAULT_BASE = "0f702ea"
 
 # Functions that were extracted, and the module that now owns them.
 EXTRACTED = {

@@ -1,24 +1,17 @@
 """
-Golden artifact integrity.
+Golden vector integrity.
 
-These tests keep the checked-in parity artifacts honest:
+These tests keep the checked-in golden vectors honest:
 
   * ``tests/golden/search_engine_vectors.json``
         every recorded contract case must still be reproduced by the
         engine, so the file cannot silently drift away from the code
         it is supposed to describe
 
-  * ``artifacts/android/corpus_sidecar.json``
-        the sidecar must be self-consistent, must match its own
-        integrity hash, and must reconstruct the engine's index state
-        exactly
-
 Nothing here needs a running HTTP server.
 """
 
-import hashlib
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -28,7 +21,6 @@ import app
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 VECTORS_PATH = REPO_ROOT / "tests" / "golden" / "search_engine_vectors.json"
-SIDECAR_PATH = REPO_ROOT / "artifacts" / "android" / "corpus_sidecar.json"
 
 
 @pytest.fixture(scope="module")
@@ -40,18 +32,6 @@ def vectors():
         )
 
     with open(VECTORS_PATH, "r", encoding="utf-8") as handle:
-        return json.load(handle)
-
-
-@pytest.fixture(scope="module")
-def sidecar():
-    if not SIDECAR_PATH.exists():
-        pytest.fail(
-            f"{SIDECAR_PATH.relative_to(REPO_ROOT)} is missing; "
-            "regenerate it with 'python -m tools.build_corpus_sidecar'"
-        )
-
-    with open(SIDECAR_PATH, "r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
@@ -244,140 +224,3 @@ def test_bare_list_shape_is_pinned(vectors):
 
     for vector in bare:
         assert vector["response"] == []
-
-
-# ----------------------------------------------------------------------
-# Corpus sidecar
-# ----------------------------------------------------------------------
-
-
-def test_sidecar_integrity_hash(sidecar):
-    payload = {
-        key: value
-        for key, value in sidecar.items()
-        if key != "integrity"
-    }
-
-    serialized = json.dumps(
-        payload,
-        sort_keys=True,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-
-    calculated = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-
-    assert calculated == sidecar["integrity"]["canonical_json_sha256"]
-
-
-def test_sidecar_shape(sidecar):
-    assert sidecar["format"] == "corpus-sidecar"
-    assert sidecar["version"] == 1
-    assert sidecar["documents"]
-
-
-def test_sidecar_document_names_are_unique(sidecar):
-    names = [document["name"] for document in sidecar["documents"]]
-
-    assert len(names) == len(set(names))
-
-
-def test_sidecar_totals_match_documents(sidecar):
-    documents = sidecar["documents"]
-
-    assert sidecar["corpus_totals"]["documents"] == len(documents)
-
-    for document in documents:
-        assert document["pages"], f"{document['name']} has no page text"
-        assert document["filename_terms"], (
-            f"{document['name']} has no filename terms"
-        )
-        assert document["content_terms"], (
-            f"{document['name']} has no content terms"
-        )
-        assert document["total_words"] > 0
-
-
-def test_sidecar_filename_terms_exclude_extension(sidecar):
-    """The filename index is built from the stem, not the full name."""
-
-    for document in sidecar["documents"]:
-        stem = os.path.splitext(document["name"])[0]
-
-        assert document["filename_terms"] == app.tokenize_filename(stem), (
-            f"{document['name']} filename terms do not match the tokenizer"
-        )
-
-
-def test_sidecar_reconstructs_the_content_index(sidecar):
-    """
-    Rebuilding the postings from the sidecar must reproduce exactly the
-    term set the generator recorded, proving the sidecar is a faithful
-    description of the index.
-    """
-
-    reconstructed = {}
-
-    for document in sidecar["documents"]:
-        for term, frequency in document["content_terms"].items():
-            reconstructed.setdefault(term, {})[document["name"]] = frequency
-
-    distinct_terms = len(reconstructed)
-
-    assert distinct_terms == sidecar["corpus_totals"]["content_terms"], (
-        "sidecar content terms do not sum to the recorded total: "
-        f"{distinct_terms} != {sidecar['corpus_totals']['content_terms']}"
-    )
-
-    for document in sidecar["documents"]:
-        for term in document["content_terms"]:
-            assert document["name"] in reconstructed[term]
-
-
-def test_sidecar_content_terms_are_lowercased(sidecar):
-    """Indexed terms are already lowercased by extraction."""
-
-    for document in sidecar["documents"]:
-        for term in document["content_terms"]:
-            assert term == term.lower(), (
-                f"{document['name']} has a non-lowercase term {term!r}"
-            )
-
-
-def test_sidecar_reproduces_the_known_turkish_quirk(sidecar):
-    """
-    The U+0130 lowercase expansion must survive into the index.
-
-    "İstanbul".lower() is "i" + U+0307 + "stanbul"; U+0307 is not
-    alphanumeric, so the token splits and the single character "i" is
-    dropped, leaving "stanbul".
-    """
-
-    unicode_note = next(
-        document
-        for document in sidecar["documents"]
-        if document["name"] == "unicode_notes.txt"
-    )
-
-    terms = unicode_note["content_terms"]
-
-    assert "stanbul" in terms, "the İstanbul split token is missing"
-    assert "istanbul" not in terms, (
-        "'istanbul' must not be indexed: the U+0307 separator splits it"
-    )
-
-
-def test_sidecar_documents_are_pdf_free(sidecar):
-    """
-    The sidecar must carry extracted text so the device never needs a
-    PDF or DOCX parser to bootstrap the shipped corpus.
-    """
-
-    extensions = {document["extension"] for document in sidecar["documents"]}
-
-    assert "pdf" in extensions, "the sidecar should cover PDF documents"
-
-    for document in sidecar["documents"]:
-        for page in document["pages"]:
-            assert isinstance(page["text"], str)
-            assert page["text"], f"{document['name']} has empty page text"

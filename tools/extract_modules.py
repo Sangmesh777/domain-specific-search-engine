@@ -47,9 +47,8 @@ no state. Its behaviour is pinned by the `content_tokenize`,
 sections of `tests/golden/search_engine_vectors.json`.
 
 The Unicode semantics here are subtle and deliberate. `str.isalnum()`
-and `str.isspace()` are Unicode-aware, so the Android port needs
-`Character.isLetter`/`isDigit`/`getType` and a two-predicate whitespace
-test rather than `Character.isLetterOrDigit`. See ANDROID.md section 5.
+and `str.isspace()` are Unicode-aware, so the tokenizer must not be
+reimplemented with ASCII-only predicates.
 """''',
     },
     "search_engine/sanitize.py": {
@@ -729,8 +728,7 @@ def apply_extraction(dry_run=False):
             '"""\nSearch engine core.\n\n'
             "A transport-independent implementation of the ranking and\n"
             "indexing behaviour. `app.py` is a thin Flask adapter over\n"
-            "this package; the Android local backend is specified to\n"
-            "mirror it.\n"
+            "this package.\n"
             '"""\n',
             encoding="utf-8",
         )

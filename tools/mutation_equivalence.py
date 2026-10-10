@@ -47,7 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # A revision from before the copy-on-write change, which still defines
 # the in-place helpers.
-DEFAULT_BASE = "5bc945f"
+DEFAULT_BASE = "0970016"
 
 ORIGINAL_NAMES = (
     "_add_document_to_memory",

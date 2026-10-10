@@ -4,8 +4,7 @@ Boot the real search engine against a throwaway corpus.
 `app.py` resolves its data directory at import time, so any tool that
 needs an isolated engine must set ``SEARCH_ENGINE_DATA_DIR`` *before*
 importing the application. This module centralises that, so the golden
-vector generator, the vector verifier and the corpus sidecar builder
-cannot drift apart.
+vector generator and the vector verifier cannot drift apart.
 """
 
 import contextlib

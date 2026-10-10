@@ -34,7 +34,7 @@ not make the underlying behaviour deterministic.
 Usage:
 
     python -m tools.storage_equivalence
-    python -m tools.storage_equivalence --base 18429c2
+    python -m tools.storage_equivalence --base a851162
     python -m tools.storage_equivalence --negative-control
 """
 
@@ -48,7 +48,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-DEFAULT_BASE = "18429c2"
+DEFAULT_BASE = "a851162"
 
 CONTAINERS = (
     "inverted_index",

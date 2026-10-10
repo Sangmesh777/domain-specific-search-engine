@@ -1,25 +1,20 @@
 """
 Tokenizer and filename-sanitizer contract.
 
-These tests pin the *exact* Unicode semantics of the Python engine.
-They exist because the Android port cannot reproduce them with the
-obvious Java/Kotlin equivalents:
+These tests pin the *exact* Unicode semantics of the engine. They are
+subtle and easy to get wrong, because Python's Unicode predicates do
+not match the obvious ASCII-only equivalents:
 
-    Python                    Java/Kotlin trap
-    ------------------------  --------------------------------------
-    str.lower()               Character.toLowerCase() drops the
-                              U+0130 expansion and the final-sigma
-                              rule. Use String.lowercase(Locale.ROOT).
-    str.isalnum()             Character.isLetterOrDigit() is false for
-                              U+00BD and U+00B2 (category No) and for
-                              U+216B (category Nl); Python is true.
-    str.isspace()             Character.isWhitespace() is false for
-                              U+00A0, U+2007, U+202F and U+0085;
-                              Python is true. It is also true for
-                              U+001C-U+001F, which Python accepts.
+    str.lower()      the U+0130 expansion and the final-sigma rule
+    str.isalnum()    true for U+00BD and U+00B2 (category No) and for
+                     U+216B (category Nl), where ASCII-only predicates
+                     are false
+    str.isspace()    true for U+00A0, U+2007, U+202F, U+0085 and
+                     U+001C-U+001F, where ASCII-only predicates are
+                     false
 
 Every case below was taken from the running engine, not from
-documentation, so a failure here means the port has drifted.
+documentation, so a failure here means the engine has drifted.
 """
 
 import pytest
