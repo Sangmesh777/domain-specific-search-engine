@@ -2,7 +2,7 @@
 The core must import and run with the web stack absent.
 
 `search_engine` is the transport-independent core: the same code has to
-serve the Flask API and the offline Android backend, so it cannot depend
+serve the Flask API and any future non-HTTP caller, so it cannot depend
 on Flask, Werkzeug, `requests`, `http` or `urllib.request`. An import
 scan proves the modules do not *name* those packages, but it cannot
 prove they would still work without them. These tests block the imports
@@ -39,16 +39,13 @@ import sys
 BLOCKED = {BLOCKED!r}
 
 class Blocker:
-    def find_module(self, name, path=None):
+    def find_spec(self, name, path=None, target=None):
         root = name.split(".")[0]
         if name in BLOCKED or root in BLOCKED:
-            return self
+            raise ImportError(
+                "blocked by the transport-free test: " + name
+            )
         return None
-
-    def load_module(self, name):
-        raise ImportError(
-            "blocked by the transport-free test: " + name
-        )
 
 sys.meta_path.insert(0, Blocker())
 

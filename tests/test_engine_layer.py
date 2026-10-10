@@ -18,7 +18,7 @@ Three separate claims are being made, and they need separate evidence:
    adversarial queries, and by the live HTTP suite.
 3. **Independence** - the engine can be called with no Flask app, no
    request context and no globals, and produces the same answer. That is
-   the property Android's LocalBackend needs, and it is the one claim a
+   the property any non-HTTP caller needs, and it is the one claim a
    golden-vector replay cannot make, because the vectors go through the
    HTTP route either way.
 

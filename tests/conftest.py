@@ -4,7 +4,7 @@ Shared pytest configuration.
 Two classes of test live in this directory:
 
   * hermetic tests
-        Golden vectors, sidecar integrity, tokenizer/rounding contracts
+        Golden vectors, tokenizer/rounding contracts
         and other pure checks. These import the application in-process
         against a throwaway data directory and need nothing running.
 

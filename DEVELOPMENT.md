@@ -30,9 +30,10 @@ so it must be set **before** `app.py` is imported.
 python3 -m pytest -q        # suite only
 ```
 
-`./run_tests.sh` runs seven gates in order: byte-compile, golden vectors,
-shadow parity, mutation equivalence, storage reconstruction parity,
-sidecar integrity, then pytest. Any failure exits non-zero.
+`./run_tests.sh` runs the verification gates in order: byte-compile,
+golden vectors, shadow parity, mutation equivalence, storage
+reconstruction parity, the negative controls, the sanitizer Windows
+branch, then pytest. Any failure exits non-zero.
 
 ### Two classes of test
 
@@ -50,8 +51,6 @@ tests/test_filename_order_persistence.py 23  Filename order across a restart
 tests/test_memory_mutation_atomicity.py 20  Copy-on-write, torn reads
 tests/test_golden_artifacts.py          19  Artifact integrity and drift
 tests/test_restart_recovery.py          16  Restart, bulk delete, rebuild
-tests/test_jvm_semantics.py              7  JVM semantics for the Kotlin port
-tests/test_port_model.py                 6  Kotlin port algorithms
 tests/test_shadow_parity.py              3  Extraction coverage guard
 tests/test_golden_vectors.py             2  Full 79-vector replay
 ```
@@ -290,7 +289,7 @@ observe a later writer.
 Two pieces of evidence support that, and they are separate claims:
 
 * `tools/mutation_equivalence.py` replays both original helpers from
-  `5bc945f:app.py` and compares the resulting state against the
+  `0970016:app.py` and compares the resulting state against the
   planners — 9 cases, 18 comparisons, 0 state diffs, 0 purity diffs.
   So the rewrite preserves behaviour rather than quietly changing it.
 * `tests/test_memory_mutation_atomicity.py` pins the coherence itself.
@@ -365,7 +364,7 @@ contain a `return` and must not call `publish_index_state`.
 
 `tools/storage_equivalence.py` runs a whole engine session - ingest,
 then a restart in a fresh process - against both the extracted layer and
-the monolith read out of git at `18429c2`, then compares:
+the monolith read out of git at `a851162`, then compares:
 
 * all four containers, element by element and order-sensitively
 * every row of all four SQLite tables, in row order
@@ -436,13 +435,13 @@ after  restart   "network security notes" -> ['network security notes.txt']  # f
 ```
 
 Reproduced on 6/6 hash seeds for the extracted engine and 3/3 for the
-monolith at `18429c2`. In the live corpus **5 of the 13 documents** were
+monolith at `a851162`. In the live corpus **5 of the 13 documents** were
 stored in a scrambled order; the breakage is usually masked because the
 phrase also appears in the document's content, which is why it went
 unnoticed.
 
-**Fix.** `filename_terms` gained an explicit ordinal, matching the
-Android specification's `(document, position, token)` model:
+**Fix.** `filename_terms` gained an explicit ordinal, matching a
+`(document, position, token)` model:
 
 ```sql
 filename_terms(filename TEXT, position INTEGER NOT NULL, term TEXT,
@@ -654,9 +653,8 @@ The transforms that produced it are declared in
 | the snapshot capture block -> deleted | the four names it bound become parameters; the caller holds the lock |
 | `jsonify(X)` -> `(X)` | the payload expression is untouched, so the body is identical - it is returned rather than serialised |
 
-This is the last piece the Android `LocalBackend` needs, because it is
-what turns the ranking into a function of an explicit snapshot rather
-than a web request.
+This is what turns the ranking into a function of an explicit snapshot
+rather than a web request.
 
 #### Two results worth keeping
 
@@ -738,15 +736,14 @@ All five are done:
 
 | Step | Commit | State |
 | --- | --- | --- |
-| 1. `search_engine/index_state.py` behind an object | `5bc945f` | done |
-| 2. memory mutation helpers moved onto it | `18429c2` | done |
-| 3. persistence (`load_database`, `save_database`, the SQLite helpers) | `48bf4ef` | done as layer 4 |
-| 4. `execute_search` -> `engine.search_index`, returning a plain dict | `d7ef25c` | done as layer 5 |
+| 1. `search_engine/index_state.py` behind an object | `0970016` | done |
+| 2. memory mutation helpers moved onto it | `a851162` | done |
+| 3. persistence (`load_database`, `save_database`, the SQLite helpers) | `1ca92e2` | done as layer 4 |
+| 4. `execute_search` -> `engine.search_index`, returning a plain dict | `c2afd38` | done as layer 5 |
 | 5. route handlers reduced to parse / call / `jsonify` | - | **partly** |
 
-Step 4 is the one the Android `LocalBackend` depends on, because it is
-what turns the ranking pipeline into a callable function of an explicit
-snapshot rather than a web request. It is finished.
+Step 4 is what turns the ranking pipeline into a callable function of an
+explicit snapshot rather than a web request. It is finished.
 
 **Step 5 is not.** The search route is now a 46-line adapter, but the
 other four handlers still hold orchestration the storage and engine
@@ -836,32 +833,9 @@ the tools cannot drift apart.
 | `generate_golden_vectors.py` | Records the vectors |
 | `verify_golden_vectors.py` | The parity gate |
 | `contract_vectors.py` | Shared contract tables |
-| `build_corpus_sidecar.py` | Builds the Android bootstrap artifact |
-| `port_model.py` | Executable model of the Kotlin ports |
 
 The corpus is materialised as real files so uploads exercise the true
 extraction path instead of bypassing it.
-
-## Porting rule
-
-The Android port is under `android/`. Because Kotlin cannot be compiled
-in this environment, `tools/port_model.py` models the Kotlin logic in
-Python **using Java's predicate semantics** and is checked against every
-contract vector by `tests/test_port_model.py`.
-
-The model also verifies the trickiest claim directly: the modelled
-predicates equal Python's `str.isalnum()` and `str.isspace()` for all
-1,114,112 code points, with zero mismatches.
-
-If you change a tokenizer, sanitizer or rounding rule, all of these must
-change together:
-
-1. `app.py`
-2. the Kotlin sources under `android/harness`
-3. `tools/port_model.py`
-4. `ANDROID.md`
-
-`tests/test_port_model.py` is what stops those from drifting.
 
 ## Development workflow
 
@@ -877,22 +851,19 @@ Use milestone commits, not one giant final commit. Existing checkpoints:
 
 ```text
 81faff9  Clean v1 release artifacts
-6a38294  Add golden-vector parity gate and hermetic test suite
-592f9a9  Add Android port specification, parity harness and port model
-0294e59  Serve the UI through a same-origin API proxy
+ae88aae  Add golden-vector parity gate and hermetic test suite
+d6435fb  Serve the UI through a same-origin API proxy
 ```
 
 ## What not to commit
 
 Already gitignored: `__pycache__/`, `*.py[cod]`, `.pytest_cache/`,
-`data/`, `frontend/node_modules/`, `frontend/dist/`, `.env`, `*.log`,
-Android build output, `*.apk`, `*.keystore`.
+`data/`, `frontend/node_modules/`, `frontend/dist/`, `.env`, `*.log`.
 
 Generated artifacts that **are** committed on purpose, because they are
 the contract and must be reviewable in diffs:
 
 * `tests/golden/search_engine_vectors.json`
-* `artifacts/android/corpus_sidecar.json`
 
 ## Layer 6: removing the web stack from `search_engine` (done)
 
@@ -923,35 +894,22 @@ dies for that unrelated reason is indistinguishable from one that found
 a real divergence. That check reports 6,205 calls, 27 device names
 actually prefixed, 0 divergences.
 
-### The defect this uncovered
+### The sanitizer backslash subtlety
 
-`tools/port_model.py` is the specification the Kotlin sources were
-written from, and `SecureFilename.kt` mirrored it: both stripped
-directory components by scanning for `/` **or** `\`, with a comment
-claiming this mirrored `os.path.basename`. On POSIX it does not. Only `/`
+`secure_filename` strips directory components by scanning for `/` **or**
+`\`. On POSIX that is not what `os.path.basename` does: only `/`
 separates there, so `os.path.basename("dir\sub\file.txt")` returns the
-whole string and it is `secure_filename` that deletes the backslash,
-giving `dirsubfile.txt`.
-
-So the port would have stored `file.txt` where the server stores
-`dirsubfile.txt`: different document names, different filename tokens,
-different search results, for the same file. Both sides were fixed and
-`tests/test_port_model_matches_engine.py` now compares the model to the
-engine directly, over a corpus asserted to contain a discriminating case.
-
-The recorded contract could not have caught this. It contained exactly
-one backslash input, `..\..\x.txt`, which sanitizes to `x.txt` either
-way. Since the Android harness has no Python engine and can only compare
-Kotlin against `tests/golden/search_engine_vectors.json`, ten
-discriminating cases were added to `SANITIZE_INPUTS` and the vectors
-regenerated. Regeneration is deterministic (identical SHA-256 on repeat)
-and the diff is exactly those ten entries; all 79 corpus vectors and the
-engine index state are byte-identical, which is the evidence that no
-engine behaviour changed.
+whole string and it is the character filter that deletes the backslash,
+giving `dirsubfile.txt`. The recorded contract originally contained
+exactly one backslash input, `..\..\x.txt`, which sanitizes to `x.txt`
+either way, so ten discriminating cases were added to `SANITIZE_INPUTS`
+and the vectors regenerated. Regeneration is deterministic (identical
+SHA-256 on repeat); all 79 corpus vectors and the engine index state are
+byte-identical, which is the evidence that no engine behaviour changed.
 
 ### Why the controls are now part of the gate
 
-`run_tests.sh` ran seven gates and none of them was the negative-control
+`run_tests.sh` ran its gates and none of them was the negative-control
 suite. When the extraction rule moved into `search_engine/indexing.py`,
 two storage controls silently stopped matching anything: their anchors
 still referred to the code that had moved. The gate reported

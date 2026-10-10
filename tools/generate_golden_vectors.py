@@ -2,7 +2,7 @@
 Generate the golden search vectors.
 
 The vectors are the executable definition of the search contract shared
-by the Python engine and the Android ports. They are produced by
+by the engine. They are produced by
 running the real Flask application against the golden corpus and
 recording complete search responses.
 
@@ -167,7 +167,7 @@ VECTOR_MATRIX = [
 ]
 
 # Vectors captured against a completely empty index, before the golden
-# corpus is uploaded. This is the Android first-run scenario: the user
+# corpus is uploaded. This is the first-run scenario: the user
 # searches before importing anything.
 EMPTY_CORPUS_MATRIX = [
     ("empty_blank_query", "", {}),

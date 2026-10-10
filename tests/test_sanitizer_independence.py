@@ -312,9 +312,8 @@ def test_the_posix_backslash_answer_is_pinned():
     Python keeps backslashes that a Windows host would convert.
 
     On POSIX, `os.path.altsep` is `None`, so `\\` is not turned into a
-    space and instead falls to the character strip and is deleted. The
-    Kotlin port must copy these answers, not the answers a Windows host
-    would give, because the server this has to agree with runs POSIX.
+    space and instead falls to the character strip and is deleted. These
+    are the answers the shipped server produces, and it runs POSIX.
     """
 
     assert _secure_filename("dir\\sub\\file.txt") == "dirsubfile.txt"

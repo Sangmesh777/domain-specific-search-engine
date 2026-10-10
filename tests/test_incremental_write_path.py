@@ -185,7 +185,7 @@ def test_both_write_functions_are_reachable_from_the_storage_layer():
 
 
 def test_storage_module_is_still_flask_free():
-    """The split exists so the Android backend can reuse this module."""
+    """The split exists so this module can be reused without the web stack."""
 
     source = source_of(STORAGE_PATH)
 

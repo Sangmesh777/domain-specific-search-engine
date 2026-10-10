@@ -76,9 +76,8 @@ def main():
     # The corpus must also be unambiguous about which characters
     # `os.path.altsep` turns into spaces on a real Windows host. On this
     # machine `os.path` is still the POSIX module, so `altsep` stays None
-    # even while `os.name` says nt, and the backslash gap between Python
-    # and the Kotlin model is therefore pinned by a direct assertion
-    # rather than by the loop above.
+    # even while `os.name` says nt, so the backslash behaviour is pinned
+    # by a direct assertion rather than by the loop above.
     altsep_is_none_here = os.path.altsep is None
 
     report = {

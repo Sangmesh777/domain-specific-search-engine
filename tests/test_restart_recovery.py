@@ -253,8 +253,8 @@ def test_deleting_an_unknown_document_reports_not_indexed(indexed):
     """
     Deleting an unknown document is an error, not a silent success.
 
-    This is the contract the Android backends map onto their
-    DocumentNotIndexed domain error.
+    This is the contract the DocumentNotIndexed domain error must
+    preserve.
     """
 
     data_dir, upload = indexed
