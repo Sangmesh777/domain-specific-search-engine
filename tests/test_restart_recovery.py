@@ -48,15 +48,11 @@ def run_probe(data_dir, *arguments, timeout=180):
         )
 
     lines = [
-        line
-        for line in completed.stdout.splitlines()
-        if line.strip().startswith("{")
+        line for line in completed.stdout.splitlines() if line.strip().startswith("{")
     ]
 
     if not lines:
-        raise AssertionError(
-            f"probe produced no JSON result:\n{completed.stdout}"
-        )
+        raise AssertionError(f"probe produced no JSON result:\n{completed.stdout}")
 
     return json.loads(lines[-1])
 

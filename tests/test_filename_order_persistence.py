@@ -39,7 +39,7 @@ def engine_driver(tmp_path_factory):
     path = tmp_path_factory.mktemp("driver") / "drive.py"
 
     path.write_text(
-        '''
+        """
 import json
 import os
 import sys
@@ -70,7 +70,7 @@ print(json.dumps({
     "hits": [hit["title"] for hit in results],
     "status": app.INDEX_STATUS["state"],
 }))
-''',
+""",
         encoding="utf-8",
     )
 
@@ -97,14 +97,11 @@ def run_engine(driver, phase, name, corpus, query, data_dir, seed=None):
     )
 
     assert completed.returncode == 0, (
-        f"engine failed:\n{completed.stdout[-2000:]}\n"
-        f"{completed.stderr[-2000:]}"
+        f"engine failed:\n{completed.stdout[-2000:]}\n" f"{completed.stderr[-2000:]}"
     )
 
     # The engine prints its startup banner before the payload.
-    payload = completed.stdout[
-        completed.stdout.index("{"):
-    ]
+    payload = completed.stdout[completed.stdout.index("{") :]
 
     return json.loads(payload)
 
@@ -144,9 +141,7 @@ def stored_filename_terms(data_dir, filename):
 # natural order. With a filename whose set order happens to be
 # alphabetical the defect is invisible, which is how it survived.
 @pytest.mark.parametrize("seed", [0, 1, 2, 3, 4, 5, 6, 7])
-def test_quoted_filename_phrase_survives_a_restart(
-    engine_driver, tmp_path, seed
-):
+def test_quoted_filename_phrase_survives_a_restart(engine_driver, tmp_path, seed):
     """
     A phrase that appears only in the filename must match before and
     after a restart, on every hash seed.
@@ -167,9 +162,9 @@ def test_quoted_filename_phrase_survives_a_restart(
 
     assert before["filename_index"] == ["zulu", "alpha", "mike", "bravo"]
 
-    assert before["hits"] == [name], (
-        f"seed {seed}: the document did not match before the restart"
-    )
+    assert before["hits"] == [
+        name
+    ], f"seed {seed}: the document did not match before the restart"
     assert after["hits"] == [name], (
         f"seed {seed}: after the restart the quoted filename phrase "
         f"stopped matching (filename_index={after['filename_index']})"
@@ -178,9 +173,7 @@ def test_quoted_filename_phrase_survives_a_restart(
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2, 3, 4, 5])
-def test_repeated_filename_tokens_survive_a_restart(
-    engine_driver, tmp_path, seed
-):
+def test_repeated_filename_tokens_survive_a_restart(engine_driver, tmp_path, seed):
     """
     A repeated token must not be collapsed.
 
@@ -203,14 +196,15 @@ def test_repeated_filename_tokens_survive_a_restart(
     )
 
     assert before["filename_index"] == ["repeat", "repeat"]
-    assert after["filename_index"] == ["repeat", "repeat"], (
-        "the repeated token was collapsed across the restart"
-    )
+    assert after["filename_index"] == [
+        "repeat",
+        "repeat",
+    ], "the repeated token was collapsed across the restart"
 
     assert before["hits"] == [name]
-    assert after["hits"] == [name], (
-        f"seed {seed}: the repeated-token phrase stopped matching"
-    )
+    assert after["hits"] == [
+        name
+    ], f"seed {seed}: the repeated-token phrase stopped matching"
 
 
 # ----------------------------------------------------------------------
@@ -218,9 +212,7 @@ def test_repeated_filename_tokens_survive_a_restart(
 # ----------------------------------------------------------------------
 
 
-def test_stored_rows_match_the_natural_token_order(
-    engine_driver, tmp_path
-):
+def test_stored_rows_match_the_natural_token_order(engine_driver, tmp_path):
     """
     Position is explicit, so the stored sequence is inspectable without
     relying on rowid.
@@ -231,9 +223,7 @@ def test_stored_rows_match_the_natural_token_order(
     corpus = write_corpus(tmp_path / "corpus", name)
     data_dir = tmp_path / "data"
 
-    run_engine(
-        engine_driver, "ingest", name, corpus, '"chapter"', data_dir
-    )
+    run_engine(engine_driver, "ingest", name, corpus, '"chapter"', data_dir)
 
     rows = stored_filename_terms(data_dir, name)
 
@@ -253,15 +243,11 @@ def test_positions_are_contiguous_and_unique(engine_driver, tmp_path):
     corpus = write_corpus(tmp_path / "corpus", name)
     data_dir = tmp_path / "data"
 
-    run_engine(
-        engine_driver, "ingest", name, corpus, '"repeat"', data_dir
-    )
+    run_engine(engine_driver, "ingest", name, corpus, '"repeat"', data_dir)
 
     rows = stored_filename_terms(data_dir, name)
 
-    assert [position for position, _term in rows] == list(
-        range(len(rows))
-    )
+    assert [position for position, _term in rows] == list(range(len(rows)))
     assert rows == [(0, "repeat"), (1, "repeat")]
 
 
@@ -270,9 +256,7 @@ def test_positions_are_contiguous_and_unique(engine_driver, tmp_path):
 # ----------------------------------------------------------------------
 
 
-def test_replacement_writes_the_new_filename_order(
-    engine_driver, tmp_path
-):
+def test_replacement_writes_the_new_filename_order(engine_driver, tmp_path):
     """
     A re-upload deletes the old rows first, so no stale order survives.
     """
@@ -304,14 +288,10 @@ def test_replacement_writes_the_new_filename_order(
     # And a genuinely different name must not inherit the old order.
     write_corpus(corpus, replacement)
 
-    run_engine(
-        engine_driver, "ingest", replacement, corpus, '"bravo"', data_dir
-    )
+    run_engine(engine_driver, "ingest", replacement, corpus, '"bravo"', data_dir)
 
     assert [
-        term for _position, term in stored_filename_terms(
-            data_dir, replacement
-        )
+        term for _position, term in stored_filename_terms(data_dir, replacement)
     ] == ["bravo", "mike", "alpha", "zulu"]
 
 
@@ -478,9 +458,7 @@ def read_migration_report(driver, data_dir, corpus, name="probe.txt"):
     return started
 
 
-def test_an_already_corrupted_database_is_repaired(
-    engine_driver, tmp_path
-):
+def test_an_already_corrupted_database_is_repaired(engine_driver, tmp_path):
     """
     Existing databases carry the scrambled order and the collapsed
     duplicates. A repair must fix both, from the document names alone,
@@ -505,33 +483,35 @@ def test_an_already_corrupted_database_is_repaired(
     first = read_migration_report(engine_driver, data_dir, corpus)
 
     assert first.returncode == 0, first.stderr[-3000:]
-    assert "filename_terms migrated" in first.stdout, (
-        "the repair did not run over a corrupted database"
-    )
+    assert (
+        "filename_terms migrated" in first.stdout
+    ), "the repair did not run over a corrupted database"
     assert "schema_changed=True" in first.stdout
     assert "repaired=3" in first.stdout
 
     assert [
-        term for _position, term in stored_filename_terms(
+        term
+        for _position, term in stored_filename_terms(
             data_dir, "zulu alpha mike bravo.txt"
         )
     ] == ["zulu", "alpha", "mike", "bravo"]
 
     assert [
-        term for _position, term in stored_filename_terms(
-            data_dir, "repeat repeat.txt"
-        )
+        term for _position, term in stored_filename_terms(data_dir, "repeat repeat.txt")
     ] == ["repeat", "repeat"], "the collapsed duplicate was not restored"
 
     assert [
-        term for _position, term in stored_filename_terms(
+        term
+        for _position, term in stored_filename_terms(
             data_dir, "chapter appendix index glossary.txt"
         )
     ] == ["chapter", "appendix", "index", "glossary"]
 
-    columns = sqlite3.connect(
-        str(data_dir / "search.db")
-    ).execute("PRAGMA table_info(filename_terms)").fetchall()
+    columns = (
+        sqlite3.connect(str(data_dir / "search.db"))
+        .execute("PRAGMA table_info(filename_terms)")
+        .fetchall()
+    )
 
     assert [column[1] for column in columns] == [
         "filename",
@@ -543,14 +523,12 @@ def test_an_already_corrupted_database_is_repaired(
     second = read_migration_report(engine_driver, data_dir, corpus)
 
     assert second.returncode == 0
-    assert "filename_terms migrated" not in second.stdout, (
-        "the repair ran again on an already-correct database"
-    )
+    assert (
+        "filename_terms migrated" not in second.stdout
+    ), "the repair ran again on an already-correct database"
 
 
-def test_the_repair_removes_rows_for_vanished_documents(
-    engine_driver, tmp_path
-):
+def test_the_repair_removes_rows_for_vanished_documents(engine_driver, tmp_path):
     """
     A row whose document no longer exists would be served as a filename
     token for a document that is not there.
@@ -580,9 +558,7 @@ def test_the_repair_removes_rows_for_vanished_documents(
     assert stored_filename_terms(data_dir, "vanished.txt") == []
 
 
-def test_a_fresh_database_is_not_reported_as_migrated(
-    engine_driver, tmp_path
-):
+def test_a_fresh_database_is_not_reported_as_migrated(engine_driver, tmp_path):
     """A clean install must not claim to have repaired anything."""
 
     name = "chapter appendix index glossary.txt"
@@ -590,16 +566,16 @@ def test_a_fresh_database_is_not_reported_as_migrated(
     corpus = write_corpus(tmp_path / "corpus", name)
     data_dir = tmp_path / "data"
 
-    first = read_migration_report(
-        engine_driver, data_dir, corpus, name=name
-    )
+    first = read_migration_report(engine_driver, data_dir, corpus, name=name)
 
     assert first.returncode == 0
     assert "filename_terms migrated" not in first.stdout
 
-    columns = sqlite3.connect(
-        str(data_dir / "search.db")
-    ).execute("PRAGMA table_info(filename_terms)").fetchall()
+    columns = (
+        sqlite3.connect(str(data_dir / "search.db"))
+        .execute("PRAGMA table_info(filename_terms)")
+        .fetchall()
+    )
 
     assert [column[1] for column in columns] == [
         "filename",
@@ -667,6 +643,4 @@ def test_the_reader_follows_position_not_rowid(tmp_path):
         "chapter",
         "appendix",
         "index",
-    ], (
-        "reconstruction followed rowid instead of position"
-    )
+    ], "reconstruction followed rowid instead of position"

@@ -74,8 +74,7 @@ def run_blocked(body):
 def test_every_core_module_imports_with_the_web_stack_blocked():
     """The whole package, not just the engine."""
 
-    result = run_blocked(
-        """
+    result = run_blocked("""
 import importlib
 import pathlib
 
@@ -89,8 +88,7 @@ for name in names:
     importlib.import_module("search_engine." + name)
 
 print("IMPORTED:", ",".join(names))
-"""
-    )
+""")
 
     assert result.returncode == 0, result.stderr
 
@@ -120,8 +118,7 @@ def test_the_engine_produces_a_payload_with_the_web_stack_blocked():
     request context and no test client anywhere in the process.
     """
 
-    result = run_blocked(
-        """
+    result = run_blocked("""
 import json
 
 from search_engine.engine import search_index
@@ -145,8 +142,7 @@ payload = search_index(
 )
 
 print("JSON:" + json.dumps(payload, sort_keys=True))
-"""
-    )
+""")
 
     assert result.returncode == 0, result.stderr
 
@@ -168,16 +164,14 @@ def test_the_sanitizer_runs_with_the_web_stack_blocked():
     secondary; the point is that the call happens at all.
     """
 
-    result = run_blocked(
-        """
+    result = run_blocked("""
 from search_engine.sanitize import sanitize_upload_filename
 
 print("A:" + sanitize_upload_filename("My File.pdf"))
 print("B:" + sanitize_upload_filename("dir\\\\sub\\\\file.txt"))
 print("C:" + sanitize_upload_filename("../../etc/passwd.txt"))
 print("D:" + repr(sanitize_upload_filename("archive.zip")))
-"""
-    )
+""")
 
     assert result.returncode == 0, result.stderr
 
@@ -201,16 +195,14 @@ def test_the_blocker_would_actually_block_something():
     import these modules happily.
     """
 
-    result = run_blocked(
-        """
+    result = run_blocked("""
 try:
     import flask
 except ImportError as error:
     print("BLOCKED:" + str(error))
 else:
     print("NOT BLOCKED")
-"""
-    )
+""")
 
     assert result.returncode == 0, result.stderr
 

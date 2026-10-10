@@ -11,7 +11,6 @@ from werkzeug.utils import secure_filename
 import threading
 import time
 
-
 # ============================================================
 # FLASK SETUP
 # ============================================================
@@ -32,20 +31,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # must never touch the developer's real corpus.
 #
 # Default behaviour is unchanged: <repo>/data
-DATA_FOLDER = os.environ.get(
-    "SEARCH_ENGINE_DATA_DIR"
-) or os.path.join(BASE_DIR, "data")
+DATA_FOLDER = os.environ.get("SEARCH_ENGINE_DATA_DIR") or os.path.join(BASE_DIR, "data")
 
 INDEX_FILE = os.path.join(DATA_FOLDER, "inverted_index.json")
 META_FILE = os.path.join(DATA_FOLDER, "document_meta.json")
-FILENAME_INDEX_FILE = os.path.join(
-    DATA_FOLDER,
-    "filename_index.json"
-)
-PAGE_TEXT_FILE = os.path.join(
-    DATA_FOLDER,
-    "page_text.json"
-)
+FILENAME_INDEX_FILE = os.path.join(DATA_FOLDER, "filename_index.json")
+PAGE_TEXT_FILE = os.path.join(DATA_FOLDER, "page_text.json")
 SQLITE_DB_FILE = os.path.join(DATA_FOLDER, "search.db")
 
 
@@ -72,14 +63,6 @@ from search_engine.text import (
     tokenize_filename,
 )
 
-
-
-
-
-
-
-
-
 # ============================================================
 # DOCUMENT EXTRACTION
 # ============================================================
@@ -95,21 +78,9 @@ from search_engine.snippet import (
     get_snippet_and_page,
 )
 
-
-
-
-
-
-
 # ============================================================
 # PAGE-AWARE SNIPPET
 # ============================================================
-
-
-
-
-
-
 
 
 # ============================================================
@@ -248,6 +219,7 @@ def assert_index_state_consistent():
                 "INDEX_STATE.replace_snapshot + sync_index_globals_from_state."
             )
 
+
 # ============================================================
 # INDEXING STATE
 # ============================================================
@@ -345,10 +317,7 @@ def rebuild_database_background():
             last_error=str(error),
         )
 
-        print(
-            "[INDEX ERROR] Background rebuild failed: "
-            f"{error}"
-        )
+        print("[INDEX ERROR] Background rebuild failed: " f"{error}")
 
     finally:
 
@@ -359,8 +328,7 @@ def rebuild_database_background():
 
         if pending_rebuild:
             print(
-                "[INDEX] Changes arrived during rebuild; "
-                "starting follow-up rebuild."
+                "[INDEX] Changes arrived during rebuild; " "starting follow-up rebuild."
             )
 
             start_background_rebuild()
@@ -372,10 +340,7 @@ def start_background_rebuild():
 
     with INDEX_STATUS_LOCK:
 
-        if (
-            INDEX_THREAD is not None
-            and INDEX_THREAD.is_alive()
-        ):
+        if INDEX_THREAD is not None and INDEX_THREAD.is_alive():
             INDEX_REBUILD_REQUESTED = True
 
             return False
@@ -413,6 +378,7 @@ def start_background_rebuild():
 # index globals. Nothing here may grow storage logic back into the
 # application.
 
+
 def get_sqlite_connection():
     """
     Thin adapter over storage.get_sqlite_connection.
@@ -421,9 +387,7 @@ def get_sqlite_connection():
     milestone must not touch - keep their existing call sites.
     """
 
-    return storage.get_sqlite_connection(
-        SQLITE_DB_FILE
-    )
+    return storage.get_sqlite_connection(SQLITE_DB_FILE)
 
 
 def initialize_sqlite_store():
@@ -440,9 +404,7 @@ def initialize_sqlite_store():
 
     with get_sqlite_connection() as connection:
 
-        storage.create_schema(
-            connection
-        )
+        storage.create_schema(connection)
 
         # Repair databases written before filename_terms carried an
         # explicit position. The correct token sequence is derivable
@@ -467,13 +429,8 @@ def initialize_sqlite_store():
                 f"{len(filename_term_migration['orphans_removed'])}"
             )
 
-        if (
-            storage.count_documents(connection) == 0
-            and DOCUMENT_METADATA
-        ):
-            sync_sqlite_from_memory(
-                connection
-            )
+        if storage.count_documents(connection) == 0 and DOCUMENT_METADATA:
+            sync_sqlite_from_memory(connection)
 
     # SQLite becomes the persistent source of truth for the
     # incremental document index.
@@ -599,17 +556,6 @@ def save_database():
 from search_engine import storage
 
 
-
-
-
-
-
-
-
-
-
-
-
 def incrementally_index_document(
     filename,
     file_path,
@@ -633,9 +579,7 @@ def incrementally_index_document(
     )
 
     if extracted is None:
-        raise ValueError(
-            "Document contains no readable text."
-        )
+        raise ValueError("Document contains no readable text.")
 
     content_words = extracted["content_words"]
     term_counts = extracted["term_counts"]
@@ -643,11 +587,7 @@ def incrementally_index_document(
     pages = extracted["pages"]
     metadata = extracted["metadata"]
 
-    old_term_counts = (
-        get_document_term_counts_from_sqlite(
-            filename
-        )
-    )
+    old_term_counts = get_document_term_counts_from_sqlite(filename)
 
     # Build the replacement containers without publishing, then swap
     # once. A concurrent search sees the old generation or the new one,
@@ -704,11 +644,7 @@ def incrementally_remove_document(
     Remove exactly one document from memory and SQLite.
     """
 
-    old_term_counts = (
-        get_document_term_counts_from_sqlite(
-            filename
-        )
-    )
+    old_term_counts = get_document_term_counts_from_sqlite(filename)
 
     with INDEX_DATA_LOCK:
 
@@ -750,16 +686,9 @@ def queue_index_refresh():
     return False
 
 
-
-
 # ============================================================
 # DATABASE SAVE
 # ============================================================
-
-
-
-
-
 
 
 # ============================================================
@@ -788,9 +717,7 @@ def rebuild_database():
     index dictionaries are swapped together.
     """
 
-    new_snapshot = indexing.build_index_from_folder(
-        DATA_FOLDER
-    )
+    new_snapshot = indexing.build_index_from_folder(DATA_FOLDER)
 
     new_inverted_index = new_snapshot["inverted_index"]
     new_document_metadata = new_snapshot["document_metadata"]
@@ -812,16 +739,16 @@ def rebuild_database():
     # half-rebound set - one global from the new generation and one from
     # the old.
     with INDEX_DATA_LOCK:
-        publish_index_state({
-            "inverted_index": new_inverted_index,
-            "document_metadata": new_document_metadata,
-            "filename_index": new_filename_index,
-            "page_text_index": new_page_text_index,
-        })
+        publish_index_state(
+            {
+                "inverted_index": new_inverted_index,
+                "document_metadata": new_document_metadata,
+                "filename_index": new_filename_index,
+                "page_text_index": new_page_text_index,
+            }
+        )
 
-    print(
-        "[REBUILD] Active snapshot swapped atomically."
-    )
+    print("[REBUILD] Active snapshot swapped atomically.")
 
     # Keep SQLite synchronized after an explicit full rebuild.
     with get_sqlite_connection() as connection:
@@ -865,39 +792,23 @@ set_index_status(
     last_error=None,
 )
 
-print(
-    f"[DATABASE] Data folder: {DATA_FOLDER}"
-)
+print(f"[DATABASE] Data folder: {DATA_FOLDER}")
 
-print(
-    f"[DATABASE] Documents loaded: "
-    f"{len(DOCUMENT_METADATA)}"
-)
+print(f"[DATABASE] Documents loaded: " f"{len(DOCUMENT_METADATA)}")
 
-print(
-    f"[DATABASE] Indexed content terms: "
-    f"{len(REAL_INVERTED_INDEX)}"
-)
+print(f"[DATABASE] Indexed content terms: " f"{len(REAL_INVERTED_INDEX)}")
 
-print(
-    f"[DATABASE] Filenames indexed: "
-    f"{len(FILENAME_INDEX)}"
-)
+print(f"[DATABASE] Filenames indexed: " f"{len(FILENAME_INDEX)}")
 
-print(
-    f"[DATABASE] Page-text entries: "
-    f"{len(PAGE_TEXT_INDEX)}"
-)
+print(f"[DATABASE] Page-text entries: " f"{len(PAGE_TEXT_INDEX)}")
 
 
 # ============================================================
 # UPLOAD API
 # ============================================================
 
-@app.route(
-    "/api/upload",
-    methods=["POST"]
-)
+
+@app.route("/api/upload", methods=["POST"])
 def upload_file():
     """
     Bulk upload with document-local extraction/indexing and ONE SQLite
@@ -907,9 +818,7 @@ def upload_file():
     files = request.files.getlist("file")
 
     if not files:
-        return jsonify({
-            "error": "No files found"
-        }), 400
+        return jsonify({"error": "No files found"}), 400
 
     uploaded_names = []
     created_names = []
@@ -922,25 +831,21 @@ def upload_file():
     try:
         for file in files:
 
-            original_filename = (
-                file.filename or ""
-            ).strip()
+            original_filename = (file.filename or "").strip()
 
-            safe_filename = (
-                sanitize_upload_filename(
-                    original_filename
-                )
-            )
+            safe_filename = sanitize_upload_filename(original_filename)
 
             if not safe_filename:
 
-                rejected_files.append({
-                    "filename": original_filename,
-                    "reason": (
-                        "Unsupported or invalid filename. "
-                        "Allowed: PDF, DOCX, TXT."
-                    ),
-                })
+                rejected_files.append(
+                    {
+                        "filename": original_filename,
+                        "reason": (
+                            "Unsupported or invalid filename. "
+                            "Allowed: PDF, DOCX, TXT."
+                        ),
+                    }
+                )
 
                 continue
 
@@ -949,9 +854,7 @@ def upload_file():
                 safe_filename,
             )
 
-            existed_before = os.path.isfile(
-                file_path
-            )
+            existed_before = os.path.isfile(file_path)
 
             temp_path = file_path + ".uploading"
 
@@ -971,15 +874,11 @@ def upload_file():
                     commit=False,
                 )
 
-                uploaded_names.append(
-                    safe_filename
-                )
+                uploaded_names.append(safe_filename)
 
                 if existed_before:
 
-                    replaced_names.append(
-                        safe_filename
-                    )
+                    replaced_names.append(safe_filename)
 
                     print(
                         "[UPLOAD] Replaced and "
@@ -989,9 +888,7 @@ def upload_file():
 
                 else:
 
-                    created_names.append(
-                        safe_filename
-                    )
+                    created_names.append(safe_filename)
 
                     print(
                         "[UPLOAD] Created and "
@@ -1007,11 +904,12 @@ def upload_file():
                     except OSError:
                         pass
 
-                failed_files.append({
-                    "filename": safe_filename,
-                    "reason":
-                        f"Could not index file: {error}",
-                })
+                failed_files.append(
+                    {
+                        "filename": safe_filename,
+                        "reason": f"Could not index file: {error}",
+                    }
+                )
 
         connection.commit()
 
@@ -1031,31 +929,36 @@ def upload_file():
         last_error=None,
     )
 
-    return jsonify({
-        "message": (
-            f"Processed {len(uploaded_names)} "
-            f"file"
-            f"{'s' if len(uploaded_names) != 1 else ''}: "
-            f"{len(created_names)} created, "
-            f"{len(replaced_names)} replaced."
+    return (
+        jsonify(
+            {
+                "message": (
+                    f"Processed {len(uploaded_names)} "
+                    f"file"
+                    f"{'s' if len(uploaded_names) != 1 else ''}: "
+                    f"{len(created_names)} created, "
+                    f"{len(replaced_names)} replaced."
+                ),
+                "uploaded": uploaded_names,
+                "created": created_names,
+                "replaced": replaced_names,
+                "rejected": rejected_files,
+                "failed": failed_files,
+                "uploaded_count": len(uploaded_names),
+                "created_count": len(created_names),
+                "replaced_count": len(replaced_names),
+                "rejected_count": len(rejected_files),
+                "failed_count": len(failed_files),
+                "indexing_started": False,
+                "indexing": get_index_status(),
+                "documents": len(DOCUMENT_METADATA),
+                "content_terms": len(REAL_INVERTED_INDEX),
+                "filenames_indexed": len(FILENAME_INDEX),
+                "page_text_entries": len(PAGE_TEXT_INDEX),
+            }
         ),
-        "uploaded": uploaded_names,
-        "created": created_names,
-        "replaced": replaced_names,
-        "rejected": rejected_files,
-        "failed": failed_files,
-        "uploaded_count": len(uploaded_names),
-        "created_count": len(created_names),
-        "replaced_count": len(replaced_names),
-        "rejected_count": len(rejected_files),
-        "failed_count": len(failed_files),
-        "indexing_started": False,
-        "indexing": get_index_status(),
-        "documents": len(DOCUMENT_METADATA),
-        "content_terms": len(REAL_INVERTED_INDEX),
-        "filenames_indexed": len(FILENAME_INDEX),
-        "page_text_entries": len(PAGE_TEXT_INDEX),
-    }), 200
+        200,
+    )
 
 
 # ============================================================
@@ -1071,29 +974,17 @@ def upload_file():
 # rule written here is a rule the two modes can drift apart on.
 
 
-@app.route(
-    "/api/search",
-    methods=["GET"]
-)
+@app.route("/api/search", methods=["GET"])
 def execute_search():
     """
     Thin adapter over search_engine.engine.search_index.
     """
 
-    raw_query_text = request.args.get(
-        "q",
-        ""
-    )
+    raw_query_text = request.args.get("q", "")
 
-    page_text = request.args.get(
-        "page",
-        "1"
-    )
+    page_text = request.args.get("page", "1")
 
-    limit_text = request.args.get(
-        "limit",
-        "10"
-    )
+    limit_text = request.args.get("limit", "10")
 
     # The engine receives one coherent generation. Capturing all four
     # under the lock is what stops a request seeing, say, the new
@@ -1119,68 +1010,38 @@ def execute_search():
 
 from search_engine.engine import search_index
 
-
-
-
-
-
-
 # ============================================================
 # DOCUMENT VIEW API
 # ============================================================
 
-@app.route(
-    "/api/documents/<path:filename>",
-    methods=["GET", "DELETE"]
-)
+
+@app.route("/api/documents/<path:filename>", methods=["GET", "DELETE"])
 def open_document(filename):
 
-    safe_path = resolve_document_path(
-        filename
-    )
+    safe_path = resolve_document_path(filename)
 
     if safe_path is None:
-        return jsonify({
-            "error":
-                "Invalid document path."
-        }), 400
+        return jsonify({"error": "Invalid document path."}), 400
 
-    safe_filename = os.path.basename(
-        safe_path
-    )
+    safe_filename = os.path.basename(safe_path)
 
     if safe_filename not in DOCUMENT_METADATA:
-        return jsonify({
-            "error":
-                "Document is not indexed."
-        }), 404
+        return jsonify({"error": "Document is not indexed."}), 404
 
     if request.method == "DELETE":
 
-        if not os.path.isfile(
-            safe_path
-        ):
-            return jsonify({
-                "error":
-                    "Document file not found."
-            }), 404
+        if not os.path.isfile(safe_path):
+            return jsonify({"error": "Document file not found."}), 404
 
         try:
 
-            os.remove(
-                safe_path
-            )
+            os.remove(safe_path)
 
-            incrementally_remove_document(
-                safe_filename
-            )
+            incrementally_remove_document(safe_filename)
 
         except Exception as error:
 
-            return jsonify({
-                "error":
-                    f"Could not delete document: {error}"
-            }), 500
+            return jsonify({"error": f"Could not delete document: {error}"}), 500
 
         set_index_status(
             "READY",
@@ -1189,42 +1050,28 @@ def open_document(filename):
             last_error=None,
         )
 
-        print(
-            "[DELETE] Removed and "
-            "incrementally unindexed: "
-            f"{safe_filename}"
+        print("[DELETE] Removed and " "incrementally unindexed: " f"{safe_filename}")
+
+        return (
+            jsonify(
+                {
+                    "message": f"Deleted {safe_filename} successfully.",
+                    "deleted": safe_filename,
+                    "documents": len(DOCUMENT_METADATA),
+                    "content_terms": len(REAL_INVERTED_INDEX),
+                    "filenames_indexed": len(FILENAME_INDEX),
+                    "page_text_entries": len(PAGE_TEXT_INDEX),
+                    "indexing_started": False,
+                    "indexing": get_index_status(),
+                }
+            ),
+            200,
         )
 
-        return jsonify({
-            "message":
-                f"Deleted {safe_filename} successfully.",
-            "deleted":
-                safe_filename,
-            "documents":
-                len(DOCUMENT_METADATA),
-            "content_terms":
-                len(REAL_INVERTED_INDEX),
-            "filenames_indexed":
-                len(FILENAME_INDEX),
-            "page_text_entries":
-                len(PAGE_TEXT_INDEX),
-            "indexing_started":
-                False,
-            "indexing":
-                get_index_status(),
-        }), 200
-
-    return send_from_directory(
-        DATA_FOLDER,
-        safe_filename,
-        as_attachment=False
-    )
+    return send_from_directory(DATA_FOLDER, safe_filename, as_attachment=False)
 
 
-@app.route(
-    "/api/documents/bulk-delete",
-    methods=["POST"]
-)
+@app.route("/api/documents/bulk-delete", methods=["POST"])
 def bulk_delete_documents():
     """
     Bulk delete multiple documents in one SQLite transaction.
@@ -1233,50 +1080,27 @@ def bulk_delete_documents():
         {"filenames": ["one.txt", "two.pdf"]}
     """
 
-    payload = request.get_json(
-        silent=True
-    ) or {}
+    payload = request.get_json(silent=True) or {}
 
-    filenames = payload.get(
-        "filenames"
-    )
+    filenames = payload.get("filenames")
 
-    if not isinstance(
-        filenames,
-        list
-    ):
-        return jsonify({
-            "error":
-                "'filenames' must be a JSON array."
-        }), 400
+    if not isinstance(filenames, list):
+        return jsonify({"error": "'filenames' must be a JSON array."}), 400
 
     normalized_filenames = []
 
     for filename in filenames:
 
-        if not isinstance(
-            filename,
-            str
-        ):
+        if not isinstance(filename, str):
             continue
 
-        safe_filename = os.path.basename(
-            filename.strip()
-        )
+        safe_filename = os.path.basename(filename.strip())
 
-        if (
-            safe_filename
-            and safe_filename not in normalized_filenames
-        ):
-            normalized_filenames.append(
-                safe_filename
-            )
+        if safe_filename and safe_filename not in normalized_filenames:
+            normalized_filenames.append(safe_filename)
 
     if not normalized_filenames:
-        return jsonify({
-            "error":
-                "No valid filenames supplied."
-        }), 400
+        return jsonify({"error": "No valid filenames supplied."}), 400
 
     deleted = []
     not_found = []
@@ -1288,28 +1112,16 @@ def bulk_delete_documents():
 
         for filename in normalized_filenames:
 
-            file_path = os.path.join(
-                DATA_FOLDER,
-                filename
-            )
+            file_path = os.path.join(DATA_FOLDER, filename)
 
             try:
 
-                indexed_exists = (
-                    filename in DOCUMENT_METADATA
-                )
+                indexed_exists = filename in DOCUMENT_METADATA
 
-                filesystem_exists = os.path.isfile(
-                    file_path
-                )
+                filesystem_exists = os.path.isfile(file_path)
 
-                if (
-                    not indexed_exists
-                    and not filesystem_exists
-                ):
-                    not_found.append(
-                        filename
-                    )
+                if not indexed_exists and not filesystem_exists:
+                    not_found.append(filename)
                     continue
 
                 incrementally_remove_document(
@@ -1321,9 +1133,7 @@ def bulk_delete_documents():
                 if filesystem_exists:
                     os.remove(file_path)
 
-                deleted.append(
-                    filename
-                )
+                deleted.append(filename)
 
                 print(
                     "[BULK DELETE] Removed and "
@@ -1333,10 +1143,12 @@ def bulk_delete_documents():
 
             except Exception as error:
 
-                failed.append({
-                    "filename": filename,
-                    "reason": str(error),
-                })
+                failed.append(
+                    {
+                        "filename": filename,
+                        "reason": str(error),
+                    }
+                )
 
         connection.commit()
 
@@ -1356,79 +1168,63 @@ def bulk_delete_documents():
         last_error=None,
     )
 
-    return jsonify({
-        "message":
-            f"Bulk delete complete: {len(deleted)} deleted.",
-        "deleted": deleted,
-        "not_found": not_found,
-        "failed": failed,
-        "deleted_count": len(deleted),
-        "not_found_count": len(not_found),
-        "failed_count": len(failed),
-        "indexing_started": False,
-        "indexing": get_index_status(),
-        "documents": len(DOCUMENT_METADATA),
-        "content_terms": len(REAL_INVERTED_INDEX),
-        "filenames_indexed": len(FILENAME_INDEX),
-        "page_text_entries": len(PAGE_TEXT_INDEX),
-    }), 200
+    return (
+        jsonify(
+            {
+                "message": f"Bulk delete complete: {len(deleted)} deleted.",
+                "deleted": deleted,
+                "not_found": not_found,
+                "failed": failed,
+                "deleted_count": len(deleted),
+                "not_found_count": len(not_found),
+                "failed_count": len(failed),
+                "indexing_started": False,
+                "indexing": get_index_status(),
+                "documents": len(DOCUMENT_METADATA),
+                "content_terms": len(REAL_INVERTED_INDEX),
+                "filenames_indexed": len(FILENAME_INDEX),
+                "page_text_entries": len(PAGE_TEXT_INDEX),
+            }
+        ),
+        200,
+    )
 
 
-@app.route(
-    "/api/rebuild",
-    methods=["POST"]
-)
+@app.route("/api/rebuild", methods=["POST"])
 def rebuild_api():
 
     indexing_started = start_background_rebuild()
 
-    return jsonify({
-
-        "message":
-            (
-                "Search database rebuild started."
-                if indexing_started
-                else
-                "Search database rebuild is already running; "
-                "new filesystem changes will be picked up automatically."
-            ),
-
-        "indexing_started":
-            indexing_started,
-
-        "indexing":
-            get_index_status(),
-
-    }), 202
+    return (
+        jsonify(
+            {
+                "message": (
+                    "Search database rebuild started."
+                    if indexing_started
+                    else "Search database rebuild is already running; "
+                    "new filesystem changes will be picked up automatically."
+                ),
+                "indexing_started": indexing_started,
+                "indexing": get_index_status(),
+            }
+        ),
+        202,
+    )
 
 
-@app.route(
-    "/api/status",
-    methods=["GET"]
-)
+@app.route("/api/status", methods=["GET"])
 def database_status():
 
-    return jsonify({
-
-        "documents":
-            len(DOCUMENT_METADATA),
-
-        "content_terms":
-            len(REAL_INVERTED_INDEX),
-
-        "filenames_indexed":
-            len(FILENAME_INDEX),
-
-        "page_text_entries":
-            len(PAGE_TEXT_INDEX),
-
-        "data_folder":
-            DATA_FOLDER,
-
-        "indexing":
-            get_index_status()
-
-    })
+    return jsonify(
+        {
+            "documents": len(DOCUMENT_METADATA),
+            "content_terms": len(REAL_INVERTED_INDEX),
+            "filenames_indexed": len(FILENAME_INDEX),
+            "page_text_entries": len(PAGE_TEXT_INDEX),
+            "data_folder": DATA_FOLDER,
+            "indexing": get_index_status(),
+        }
+    )
 
 
 # ============================================================
@@ -1437,12 +1233,6 @@ def database_status():
 
 if __name__ == "__main__":
 
-    print(
-        "Starting Final VTU Engine "
-        "on port 5000..."
-    )
+    print("Starting Final VTU Engine " "on port 5000...")
 
-    app.run(
-        port=5000,
-        debug=True
-    )
+    app.run(port=5000, debug=True)

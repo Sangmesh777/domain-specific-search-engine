@@ -73,7 +73,9 @@ def compare_values(actual, expected, path, tolerance, diffs, exact_ints=True):
             diffs.append(f"{path}.{key}: missing (expected {_describe(expected[key])})")
 
         for key in extra:
-            diffs.append(f"{path}.{key}: unexpected field with value {_describe(actual[key])}")
+            diffs.append(
+                f"{path}.{key}: unexpected field with value {_describe(actual[key])}"
+            )
 
         for key in sorted(set(expected) & set(actual)):
             compare_values(
@@ -139,11 +141,11 @@ def compare_values(actual, expected, path, tolerance, diffs, exact_ints=True):
         # Exact comparison. Integers and floats must agree exactly and
         # must agree in type: 1 and 1.0 are different JSON values even
         # though Python considers them equal.
-        if actual != expected or isinstance(actual, float) != isinstance(expected, float):
+        if actual != expected or isinstance(actual, float) != isinstance(
+            expected, float
+        ):
             if actual != expected:
-                diffs.append(
-                    f"{path}: expected {expected!r} but got {actual!r}"
-                )
+                diffs.append(f"{path}: expected {expected!r} but got {actual!r}")
             else:
                 diffs.append(
                     f"{path}: type mismatch, expected "
@@ -156,8 +158,6 @@ def compare_values(actual, expected, path, tolerance, diffs, exact_ints=True):
         diffs.append(
             f"{path}: expected {_describe(expected)} but got {_describe(actual)}"
         )
-
-
 
 
 def run_verification(tolerance=0.0, verbose=False):
@@ -223,7 +223,9 @@ def run_verification(tolerance=0.0, verbose=False):
 
 
 def _check_vector(client, vector, corpus_state, tolerance, verbose, normalize):
-    params = {key: value for key, value in vector["params"].items() if value is not None}
+    params = {
+        key: value for key, value in vector["params"].items() if value is not None
+    }
     params["q"] = vector["query"]
 
     response = client.get("/api/search", query_string=params)
@@ -312,7 +314,9 @@ def main(argv=None):
         print(f"vectors run      : {summary['total']}")
         print(f"passed           : {summary['passed']}")
         print(f"failed           : {summary['failed']}")
-        print(f"tolerance        : {'exact binary64' if not summary['tolerance'] else summary['tolerance']}")
+        print(
+            f"tolerance        : {'exact binary64' if not summary['tolerance'] else summary['tolerance']}"
+        )
 
         if summary["failed"]:
             print()

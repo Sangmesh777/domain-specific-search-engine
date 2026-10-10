@@ -34,7 +34,6 @@ from search_engine.index_state import (
     plan_upsert_document,
 )
 
-
 # ----------------------------------------------------------------------
 # Fixtures
 # ----------------------------------------------------------------------
@@ -150,9 +149,9 @@ def test_planners_do_not_share_top_level_containers_with_the_input():
         "filename_index",
         "page_text_index",
     ):
-        assert replacement[field] is not start[field], (
-            f"{field} was reused instead of replaced"
-        )
+        assert (
+            replacement[field] is not start[field]
+        ), f"{field} was reused instead of replaced"
 
 
 def test_plan_upsert_rejects_an_incomplete_current_state():
@@ -205,9 +204,7 @@ def test_upsert_removes_the_previous_revisions_terms():
 
 
 def test_upsert_keeps_a_term_shared_with_another_document():
-    start = start_state(
-        {"doc1.txt": ["shared"], "doc2.txt": ["shared", "other"]}
-    )
+    start = start_state({"doc1.txt": ["shared"], "doc2.txt": ["shared", "other"]})
 
     replacement = plan_upsert_document(
         start,
@@ -266,9 +263,9 @@ def test_delete_drops_a_term_whose_last_document_is_gone():
         {"solo": 1, "shared": 1},
     )
 
-    assert "solo" not in replacement["inverted_index"], (
-        "a term with no remaining documents must disappear"
-    )
+    assert (
+        "solo" not in replacement["inverted_index"]
+    ), "a term with no remaining documents must disappear"
     assert replacement["inverted_index"]["shared"] == {"doc2.txt": 1}
 
 
@@ -332,9 +329,7 @@ def test_replace_snapshot_publishes_all_four_fields_of_the_replacement():
     state = IndexState(**start_state({"doc1.txt": ["oldterm"]}))
 
     replacement = plan_upsert_document(
-        state.snapshot(),
-        old_term_counts={"oldterm": 1},
-        **revision(["newterm"])
+        state.snapshot(), old_term_counts={"oldterm": 1}, **revision(["newterm"])
     )
 
     state.replace_snapshot(replacement)
@@ -486,9 +481,7 @@ def test_a_captured_snapshot_is_frozen_against_later_publication(app_module):
             engine.publish_index_state(
                 plan_upsert_document(
                     engine.INDEX_STATE.snapshot(),
-                    old_term_counts={
-                        term: 1 for term in (generation_a | generation_b)
-                    },
+                    old_term_counts={term: 1 for term in (generation_a | generation_b)},
                     **revision(sorted(terms), label=name),
                 )
             )
@@ -822,9 +815,7 @@ def _publication_lines(app_module):
             name = (
                 function.attr
                 if isinstance(function, ast.Attribute)
-                else function.id
-                if isinstance(function, ast.Name)
-                else None
+                else function.id if isinstance(function, ast.Name) else None
             )
 
             if name == "publish_index_state":
@@ -902,9 +893,7 @@ def test_publish_index_state_is_the_only_writer_of_the_state(app_module):
     assert direct, "expected publish_index_state to call replace_snapshot"
 
     outside = [
-        line
-        for line in direct
-        if not (publish_span[0] <= line <= publish_span[1])
+        line for line in direct if not (publish_span[0] <= line <= publish_span[1])
     ]
 
     assert not outside, (

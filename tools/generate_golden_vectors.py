@@ -62,39 +62,33 @@ VECTOR_MATRIX = [
     ("exact_content_mixed_case", "NETWORK", {}),
     ("exact_content_long_term", "topology", {}),
     ("exact_content_single_document", "ranking", {}),
-
     # --- prefix match -------------------------------------------
     ("prefix_short", "net", {}),
     ("prefix_medium", "netw", {}),
     ("prefix_very_short_one_char", "n", {}),
     ("prefix_numeric_fragment", "filler5", {}),
-
     # --- numeric matching ---------------------------------------
     ("numeric_substring", "9901", {}),
     ("numeric_substring_partial", "990", {}),
     ("numeric_filename_token", "BCS502", {}),
     ("numeric_filler_late", "filler57", {}),
-
     # --- filename matching --------------------------------------
     ("filename_single_token", "probe", {}),
     ("filename_multi_token", "BCS502 Module 2", {}),
     ("filename_with_extension", "BCS502 Module 2.pdf", {}),
-    ("filename_quoted_with_extension", "\"BCS502 Module 2.pdf\"", {}),
+    ("filename_quoted_with_extension", '"BCS502 Module 2.pdf"', {}),
     ("filename_title_case", "title", {}),
     ("filename_spaces", "Title Case Notes", {}),
     ("filename_underscore_token", "cryptography_basics", {}),
-
     # --- phrase scoring -----------------------------------------
     ("phrase_two_terms", "distributed ledger", {}),
-    ("phrase_quoted", "\"distributed ledger\"", {}),
+    ("phrase_quoted", '"distributed ledger"', {}),
     ("phrase_three_terms", "append only history", {}),
     ("phrase_no_match_terms", "ledger zebra", {}),
     ("phrase_repeated", "network connects", {}),
-
     # --- snippet windowing --------------------------------------
     ("snippet_long_document", "beacon", {}),
     ("snippet_common_term", "sharedterm", {"limit": 3}),
-
     # --- filetype filtering -------------------------------------
     ("filetype_only_txt", "txt", {}),
     ("filetype_only_pdf", "pdf", {}),
@@ -104,7 +98,6 @@ VECTOR_MATRIX = [
     ("filetype_with_keyword_pdf", "sharedterm pdf", {"limit": 50}),
     ("filetype_with_keyword_docx", "sharedterm docx", {"limit": 50}),
     ("filetype_no_match", "zzzznomatch pdf", {}),
-
     # --- pagination ---------------------------------------------
     ("pagination_page_1", "sharedterm", {}),
     ("pagination_page_2", "sharedterm", {"page": 2}),
@@ -117,7 +110,6 @@ VECTOR_MATRIX = [
     ("pagination_page_beyond_end", "sharedterm", {"page": 99}),
     ("pagination_page_not_a_number", "sharedterm", {"page": "abc"}),
     ("pagination_limit_not_a_number", "sharedterm", {"limit": "abc"}),
-
     # --- Unicode tokenization -----------------------------------
     ("unicode_ascii_extension", "caf", {}),
     ("unicode_accented", "café", {}),
@@ -133,32 +125,27 @@ VECTOR_MATRIX = [
     ("unicode_uppercase_query", "CAFÉ", {}),
     ("unicode_nbsp_token", "break", {}),
     ("unicode_figure_space_token", "space", {}),
-
     # --- query hygiene ------------------------------------------
     ("query_punctuation_trailing", "network,", {}),
     ("query_punctuation_inner", "dis-tri-buted", {}),
     ("query_extra_whitespace", "  network   security  ", {}),
-    ("query_quoted_simple", "\"network\"", {}),
-
+    ("query_quoted_simple", '"network"', {}),
     # --- no results ---------------------------------------------
     ("no_results_single", "zzzznomatch", {}),
     ("no_results_multi", "zzzznomatch qqqqnomatch", {}),
     ("no_results_punctuation_only", "!!!", {}),
-
     # --- blank query (special published shape) ------------------
     ("blank_query_default", "", {}),
     ("blank_query_with_page", "", {"page": 3}),
     ("blank_query_with_limit", "", {"limit": 25}),
     ("blank_query_whitespace", "   ", {}),
-
     # --- bare-list (legacy) response shape ----------------------
     #
     # The engine publishes a bare JSON list, not a paginated
     # object, on several reachable no-result paths. These are
     # published behaviour and must be preserved by every port.
-    ("bare_list_quoted_phrase_no_match", "\"zzzznope\"", {}),
-    ("bare_list_quoted_phrase_no_match_multi", "\"zzzz noppe qqqq\"", {}),
-
+    ("bare_list_quoted_phrase_no_match", '"zzzznope"', {}),
+    ("bare_list_quoted_phrase_no_match_multi", '"zzzz noppe qqqq"', {}),
     # A filetype filter that removes every candidate still returns a
     # paginated object with total 0, *not* a bare list. This is a
     # trap for ports that assume "no results" always means a list.
@@ -173,7 +160,7 @@ EMPTY_CORPUS_MATRIX = [
     ("empty_blank_query", "", {}),
     ("empty_keyword_query", "network", {}),
     ("empty_filetype_only_query", "pdf", {}),
-    ("empty_quoted_phrase", "\"network\"", {}),
+    ("empty_quoted_phrase", '"network"', {}),
     ("empty_prefix_query", "net", {}),
 ]
 
@@ -197,20 +184,14 @@ def normalize_response(payload):
 
     if isinstance(payload, list):
         # The engine publishes a bare list on some no-result paths.
-        return [
-            normalize_result(item)
-            for item in payload
-        ]
+        return [normalize_result(item) for item in payload]
 
     if isinstance(payload, dict):
         normalized = {}
 
         for key, value in payload.items():
             if key == "results" and isinstance(value, list):
-                normalized[key] = [
-                    normalize_result(item)
-                    for item in value
-                ]
+                normalized[key] = [normalize_result(item) for item in value]
             else:
                 normalized[key] = value
 
@@ -231,13 +212,15 @@ def _capture_vectors(client, matrix, verbose=True):
         response = client.get("/api/search", query_string=request_params)
         payload = response.get_json()
 
-        vectors.append({
-            "id": vector_id,
-            "query": query,
-            "params": _normalize_params(params),
-            "status_code": response.status_code,
-            "response": normalize_response(payload),
-        })
+        vectors.append(
+            {
+                "id": vector_id,
+                "query": query,
+                "params": _normalize_params(params),
+                "status_code": response.status_code,
+                "response": normalize_response(payload),
+            }
+        )
 
         if verbose:
             shape = "list" if isinstance(payload, list) else "object"
@@ -247,7 +230,6 @@ def _capture_vectors(client, matrix, verbose=True):
             )
 
     return vectors
-
 
 
 def generate(verbose=True):
@@ -291,11 +273,7 @@ def generate(verbose=True):
 
         responses = upload_corpus(client, corpus_dir)
 
-        failed = [
-            name
-            for response in responses
-            for name in response.get("failed", [])
-        ]
+        failed = [name for response in responses for name in response.get("failed", [])]
 
         if failed:
             raise RuntimeError(f"Golden corpus upload failed for: {failed}")
@@ -344,7 +322,6 @@ def generate(verbose=True):
         }
 
 
-
 def _normalize_params(params):
     """Return the requested params with defaults filled in."""
 
@@ -383,7 +360,6 @@ def all_vectors(document):
         yield "empty", vector
 
 
-
 def main():
     print("Generating golden search vectors")
 
@@ -407,7 +383,9 @@ def main():
     print(f"total vectors         : {total_vector_count(document)}")
     contract = document["contract_vectors"]
     print(f"content terms         : {document['engine_index_state']['content_terms']}")
-    print(f"contract cases        : {sum(len(v) for k, v in contract.items() if isinstance(v, list))}")
+    print(
+        f"contract cases        : {sum(len(v) for k, v in contract.items() if isinstance(v, list))}"
+    )
     print(f"written to            : {OUTPUT_PATH.relative_to(REPO_ROOT)}")
 
     return 0

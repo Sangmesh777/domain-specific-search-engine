@@ -100,19 +100,12 @@ SYNTHETIC_DOCUMENTS = {
         "sharedterm alphaonly alphaonly alphaonly\n"
         "repeated term appears here too and again here\n"
     ),
-    "shared_term_beta.txt": (
-        "sharedterm betaonly\n"
-    ),
+    "shared_term_beta.txt": ("sharedterm betaonly\n"),
     "unicode_document.txt": (
-        "İstanbul CAFÉ naïve under_score zerowidth\n"
-        "ascii é ½ fraction\n"
+        "İstanbul CAFÉ naïve under_score zerowidth\n" "ascii é ½ fraction\n"
     ),
-    "numeric_fragments_extra.txt": (
-        "9901 9902 9903 42 42 42 leadingzero\n"
-    ),
-    "Case Variant Notes.txt": (
-        "casetoken varianttoken\n"
-    ),
+    "numeric_fragments_extra.txt": ("9901 9902 9903 42 42 42 leadingzero\n"),
+    "Case Variant Notes.txt": ("casetoken varianttoken\n"),
 }
 
 # Filenames whose token set, under PYTHONHASHSEED=0, iterates in an order
@@ -125,9 +118,7 @@ SYNTHETIC_DOCUMENTS = {
 ORDER_SENSITIVE_DOCUMENTS = {
     "zulu alpha mike bravo.txt": "body text for the first order probe\n",
     "readme setup guide.txt": "body text for the second order probe\n",
-    "chapter appendix index glossary.txt": (
-        "body text for the third order probe\n"
-    ),
+    "chapter appendix index glossary.txt": ("body text for the third order probe\n"),
 }
 
 
@@ -179,9 +170,7 @@ def build_fixture_corpus(fixture, destination):
         pass
 
     else:
-        raise StorageEquivalenceError(
-            f"unknown corpus {fixture['corpus']!r}"
-        )
+        raise StorageEquivalenceError(f"unknown corpus {fixture['corpus']!r}")
 
 
 def build_revision_corpus(fixture, destination):
@@ -243,9 +232,8 @@ def check_effectiveness(report, fixture, revisions, label, differences):
                 )
 
         for name in report.get("requested_bulk_deletes", ()):
-            if (
-                name not in (bulk.get("not_found") or ())
-                and name not in (bulk.get("deleted") or ())
+            if name not in (bulk.get("not_found") or ()) and name not in (
+                bulk.get("deleted") or ()
             ):
                 differences.append(
                     f"{label}/effectiveness: {name!r} was requested for "
@@ -385,8 +373,7 @@ FIXTURES = (
         # the delete entirely would still produce a correct store.
         "deletes": (),
         "revisions": {
-            "shared_term_alpha.txt":
-                "sharedterm revised alpha beta gamma delta epsilon zeta\n",
+            "shared_term_alpha.txt": "sharedterm revised alpha beta gamma delta epsilon zeta\n",
             "Case Variant Notes.txt": "casevariant rewritten entirely\n",
         },
     },
@@ -490,8 +477,7 @@ def run_probe(
 
     if completed.returncode != 0:
         raise StorageEquivalenceError(
-            f"probe failed ({engine}/{phase}):\n"
-            f"{completed.stderr[-4000:]}"
+            f"probe failed ({engine}/{phase}):\n" f"{completed.stderr[-4000:]}"
         )
 
     return json.loads(Path(out_path).read_text(encoding="utf-8"))
@@ -642,14 +628,8 @@ def compare_sqlite(left, right, label, differences):
         if table == DEFECT_FIXED_TABLE:
 
             # Shape differs on purpose; content must not.
-            left_pairs = sorted(
-                (row[0], row[-1])
-                for row in a["rows"]
-            )
-            right_pairs = sorted(
-                (row[0], row[-1])
-                for row in b["rows"]
-            )
+            left_pairs = sorted((row[0], row[-1]) for row in a["rows"])
+            right_pairs = sorted((row[0], row[-1]) for row in b["rows"])
 
             if left_pairs != right_pairs:
                 missing = sorted(set(left_pairs) - set(right_pairs))
@@ -675,13 +655,9 @@ def compare_sqlite(left, right, label, differences):
         difference = None
 
         if len(a["rows"]) != len(b["rows"]):
-            difference = (
-                f"row count {len(a['rows'])} vs {len(b['rows'])}"
-            )
+            difference = f"row count {len(a['rows'])} vs {len(b['rows'])}"
         else:
-            for index, (row_a, row_b) in enumerate(
-                zip(a["rows"], b["rows"])
-            ):
+            for index, (row_a, row_b) in enumerate(zip(a["rows"], b["rows"])):
                 if row_a != row_b:
                     difference = (
                         f"first differing row {index}: "
@@ -764,9 +740,7 @@ def filename_order_instability(ingest, reconstruct):
     return changed
 
 
-def compare_reports(
-    left, right, label, differences, canonical_filename_order=False
-):
+def compare_reports(left, right, label, differences, canonical_filename_order=False):
     """
     Compare two probe reports in full.
 
@@ -793,9 +767,7 @@ def compare_reports(
             for filename, words in side["filename_index"].items():
                 side["filename_index"][filename] = sorted(words)
 
-    compare_containers(
-        left_containers, right_containers, label, differences
-    )
+    compare_containers(left_containers, right_containers, label, differences)
     compare_sqlite(left["sqlite"], right["sqlite"], label, differences)
 
     # The store immediately after the incremental operations and before
@@ -812,9 +784,7 @@ def compare_reports(
             differences,
         )
 
-    compare_json_files(
-        left["json_files"], right["json_files"], label, differences
-    )
+    compare_json_files(left["json_files"], right["json_files"], label, differences)
 
 
 def canonical_state(report):
@@ -887,9 +857,7 @@ def comparison_count(ingest, reconstruct):
     for report in (ingest, reconstruct):
 
         for container in CONTAINERS:
-            total += len(
-                json.dumps(report["containers"][container], sort_keys=True)
-            )
+            total += len(json.dumps(report["containers"][container], sort_keys=True))
 
         # Both the post-sync store and the pre-sync one, since both are
         # now compared and the count is meant to describe the run.
@@ -919,9 +887,7 @@ def run(base=DEFAULT_BASE, only=None):
     """Compare every fixture and return a summary."""
 
     fixtures = [
-        fixture
-        for fixture in FIXTURES
-        if only is None or fixture["name"] in only
+        fixture for fixture in FIXTURES if only is None or fixture["name"] in only
     ]
 
     summaries = []
@@ -944,29 +910,37 @@ def run(base=DEFAULT_BASE, only=None):
 
             build_fixture_corpus(fixture, corpus_dir)
 
-            revision_dir = build_revision_corpus(
-                fixture, workspace / "revisions"
-            )
+            revision_dir = build_revision_corpus(fixture, workspace / "revisions")
 
             reindex = tuple(fixture.get("revisions") or ())
 
             new_ingest, new_reconstruct = run_side(
-                "new", None, corpus_dir, workspace / "new",
-                fixture["deletes"], fixture.get("bulk_deletes", ()),
-                revision_dir, reindex, fixture.get("rebuild", False),
+                "new",
+                None,
+                corpus_dir,
+                workspace / "new",
+                fixture["deletes"],
+                fixture.get("bulk_deletes", ()),
+                revision_dir,
+                reindex,
+                fixture.get("rebuild", False),
             )
             legacy_ingest, legacy_reconstruct = run_side(
-                "legacy", base, corpus_dir, workspace / "legacy",
-                fixture["deletes"], fixture.get("bulk_deletes", ()),
-                revision_dir, reindex, fixture.get("rebuild", False),
+                "legacy",
+                base,
+                corpus_dir,
+                workspace / "legacy",
+                fixture["deletes"],
+                fixture.get("bulk_deletes", ()),
+                revision_dir,
+                reindex,
+                fixture.get("rebuild", False),
             )
 
         label = fixture["name"]
 
         # The parity claim: same inputs, same resulting state.
-        compare_reports(
-            legacy_ingest, new_ingest, f"{label}/ingest", differences
-        )
+        compare_reports(legacy_ingest, new_ingest, f"{label}/ingest", differences)
 
         # And, independently of the monolith, that the actions landed.
         # The monolith is only checked the same way when this is not the
@@ -1011,17 +985,17 @@ def run(base=DEFAULT_BASE, only=None):
 
         comparisons += comparison_count(new_ingest, new_reconstruct)
 
-        summaries.append({
-            "fixture": label,
-            "documents": len(
-                new_ingest["containers"]["document_metadata"]
-            ),
-            "terms": len(new_ingest["containers"]["inverted_index"]),
-            "sqlite_rows": sum(
-                len(value["rows"])
-                for value in new_ingest["sqlite"]["tables"].values()
-            ),
-        })
+        summaries.append(
+            {
+                "fixture": label,
+                "documents": len(new_ingest["containers"]["document_metadata"]),
+                "terms": len(new_ingest["containers"]["inverted_index"]),
+                "sqlite_rows": sum(
+                    len(value["rows"])
+                    for value in new_ingest["sqlite"]["tables"].values()
+                ),
+            }
+        )
 
     return summaries, comparisons, differences, reordered, fixed_order
 
@@ -1087,13 +1061,9 @@ def hash_nondeterminism_report(base=DEFAULT_BASE):
                     f"hash probe failed:\n{completed.stderr[-2000:]}"
                 )
 
-            report = json.loads(
-                (workspace / "out.json").read_text(encoding="utf-8")
-            )
+            report = json.loads((workspace / "out.json").read_text(encoding="utf-8"))
 
-            orders.append(
-                report["sqlite"]["tables"]["filename_terms"]["rows"]
-            )
+            orders.append(report["sqlite"]["tables"]["filename_terms"]["rows"])
 
     return orders[0] == orders[1], orders
 
@@ -1379,19 +1349,11 @@ def main(argv=None):
         print()
         print(
             "    restart comparison ignores filename order: "
-            + (
-                "as intended"
-                if not relaxed_found
-                else "UNEXPECTED"
-            )
+            + ("as intended" if not relaxed_found else "UNEXPECTED")
         )
         print(
             "    strict comparison still catches a filename reorder: "
-            + (
-                "yes"
-                if strict_found
-                else "NO - the parity claim is unsound"
-            )
+            + ("yes" if strict_found else "NO - the parity claim is unsound")
         )
 
         if undetected or relaxed_found or not strict_found:

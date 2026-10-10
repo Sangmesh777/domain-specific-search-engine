@@ -59,6 +59,7 @@ def _load_engine():
 
     return app
 
+
 def _load_legacy_engine(base_revision):
     """
     exec the app.py from `base_revision` into a namespace.
@@ -82,8 +83,7 @@ def _load_legacy_engine(base_revision):
 
     if "def sync_sqlite_from_memory" not in source:
         raise ProbeError(
-            f"revision {base_revision} does not look like the monolithic "
-            "engine"
+            f"revision {base_revision} does not look like the monolithic " "engine"
         )
 
     # `__file__` must live inside the repository so the engine's BASE_DIR
@@ -131,10 +131,7 @@ def _snapshot_containers(engine, data_dir=None):
 
     published = state.snapshot()
 
-    containers = {
-        name: json.loads(json.dumps(published[name]))
-        for name in CONTAINERS
-    }
+    containers = {name: json.loads(json.dumps(published[name])) for name in CONTAINERS}
 
     return containers
 
@@ -163,7 +160,7 @@ def _normalise_paths(report, data_dir):
 
     def relative(value):
         if isinstance(value, str) and value.startswith(prefix):
-            return value[len(prefix):].replace(os.sep, "/")
+            return value[len(prefix) :].replace(os.sep, "/")
         return value
 
     for metadata in report["containers"]["document_metadata"].values():
@@ -239,8 +236,7 @@ def _dump_sqlite(data_dir):
         schema = [
             {"type": row[0], "name": row[1], "sql": row[2]}
             for row in connection.execute(
-                "SELECT type, name, sql FROM sqlite_master "
-                "ORDER BY type, name"
+                "SELECT type, name, sql FROM sqlite_master " "ORDER BY type, name"
             )
         ]
 
@@ -264,9 +260,7 @@ def _dump_json_files(data_dir):
 
     for path in sorted(Path(data_dir).glob("*.json")):
 
-        dumped[path.name] = json.loads(
-            path.read_text(encoding="utf-8")
-        )
+        dumped[path.name] = json.loads(path.read_text(encoding="utf-8"))
 
     return dumped
 
@@ -280,9 +274,7 @@ def _delete(engine, names):
     the most moving parts.
     """
 
-    incrementally_remove_document = _get(
-        engine, "incrementally_remove_document"
-    )
+    incrementally_remove_document = _get(engine, "incrementally_remove_document")
 
     removed = []
 
@@ -341,17 +333,13 @@ def _reindex(engine, corpus_dir, names):
     the incremental path.
     """
 
-    incrementally_index_document = _get(
-        engine, "incrementally_index_document"
-    )
+    incrementally_index_document = _get(engine, "incrementally_index_document")
 
     reindexed = []
 
     for name in names:
         try:
-            incrementally_index_document(
-                name, str(Path(corpus_dir) / name)
-            )
+            incrementally_index_document(name, str(Path(corpus_dir) / name))
             reindexed.append(name)
 
         except Exception as error:
@@ -402,9 +390,7 @@ def _ingest(engine, corpus_dir):
     milestone must not change.
     """
 
-    incrementally_index_document = _get(
-        engine, "incrementally_index_document"
-    )
+    incrementally_index_document = _get(engine, "incrementally_index_document")
 
     indexed = []
 
@@ -458,9 +444,7 @@ def run_phase(
             _bulk_delete(engine, bulk_deletes) if bulk_deletes else None
         )
 
-        report["reindexed"] = (
-            _reindex(engine, reindex_dir, reindex) if reindex else []
-        )
+        report["reindexed"] = _reindex(engine, reindex_dir, reindex) if reindex else []
 
         # Capture the store BEFORE the full sync below.
         #

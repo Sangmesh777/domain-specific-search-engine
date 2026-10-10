@@ -90,9 +90,7 @@ TRANSFORMS = {
         "replace_exact": [
             [
                 "def rebuild_database():",
-                "def build_index_from_folder(\n"
-                "    data_folder,\n"
-                "):",
+                "def build_index_from_folder(\n" "    data_folder,\n" "):",
             ],
             # The publish tail is deleted here and re-attached in app.py.
             # It holds the `global` declarations, the save, the swap and

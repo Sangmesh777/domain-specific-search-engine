@@ -161,10 +161,7 @@ def test_snapshot_is_cheap_for_a_large_index():
         for i in range(1000)
     }
 
-    terms = {
-        f"term{i}": {f"doc{i % 1000}.txt": 1}
-        for i in range(4000)
-    }
+    terms = {f"term{i}": {f"doc{i % 1000}.txt": 1} for i in range(4000)}
 
     large = IndexState(
         inverted_index=terms,
@@ -389,9 +386,7 @@ def test_readers_never_observe_a_partial_replacement(state):
 
             # The inverted index must point at the same documents too.
             posting_targets = {
-                document
-                for postings in inverted.values()
-                for document in postings
+                document for postings in inverted.values() for document in postings
             }
 
             if posting_targets != names:

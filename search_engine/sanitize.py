@@ -37,38 +37,40 @@ _FILENAME_ASCII_STRIP_RE = re.compile(r"[^A-Za-z0-9_.-]")
 
 # Windows reserves these names in every directory. A file called
 # `NUL.txt` cannot be created there.
-_WINDOWS_DEVICE_FILES = frozenset({
-    "CON",
-    "PRN",
-    "AUX",
-    "NUL",
-    "COM1",
-    "COM2",
-    "COM3",
-    "COM4",
-    "COM5",
-    "COM6",
-    "COM7",
-    "COM8",
-    "COM9",
-    "COM\u00b9",
-    "COM\u00b2",
-    "COM\u00b3",
-    "LPT1",
-    "LPT2",
-    "LPT3",
-    "LPT4",
-    "LPT5",
-    "LPT6",
-    "LPT7",
-    "LPT8",
-    "LPT9",
-    "LPT\u00b9",
-    "LPT\u00b2",
-    "LPT\u00b3",
-    "CONIN$",
-    "CONOUT$",
-})
+_WINDOWS_DEVICE_FILES = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "COM\u00b9",
+        "COM\u00b2",
+        "COM\u00b3",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9",
+        "LPT\u00b9",
+        "LPT\u00b2",
+        "LPT\u00b3",
+        "CONIN$",
+        "CONOUT$",
+    }
+)
 
 
 def _secure_filename(filename):
@@ -128,9 +130,7 @@ def sanitize_upload_filename(filename):
     if not filename:
         return ""
 
-    safe_name = _secure_filename(
-        os.path.basename(filename)
-    )
+    safe_name = _secure_filename(os.path.basename(filename))
 
     if not safe_name:
         return ""
@@ -141,9 +141,7 @@ def sanitize_upload_filename(filename):
         ".txt",
     )
 
-    if not safe_name.lower().endswith(
-        supported_extensions
-    ):
+    if not safe_name.lower().endswith(supported_extensions):
         return ""
 
     return safe_name

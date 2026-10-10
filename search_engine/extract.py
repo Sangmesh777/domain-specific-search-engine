@@ -8,6 +8,8 @@ identical to the engine that the golden vectors pin.
 
 import PyPDF2
 import docx
+
+
 def count_phrase_occurrences(text, phrase):
     """
     Count exact adjacent occurrences of a normalized phrase.
@@ -20,13 +22,9 @@ def count_phrase_occurrences(text, phrase):
     if not text or not phrase:
         return 0
 
-    normalized_text = " ".join(
-        text.lower().split()
-    )
+    normalized_text = " ".join(text.lower().split())
 
-    normalized_phrase = " ".join(
-        phrase.lower().split()
-    )
+    normalized_phrase = " ".join(phrase.lower().split())
 
     if not normalized_phrase:
         return 0
@@ -36,21 +34,14 @@ def count_phrase_occurrences(text, phrase):
 
     while True:
 
-        position = normalized_text.find(
-            normalized_phrase,
-            start
-        )
+        position = normalized_text.find(normalized_phrase, start)
 
         if position == -1:
             break
 
         count += 1
 
-        start = (
-            position
-            +
-            len(normalized_phrase)
-        )
+        start = position + len(normalized_phrase)
 
     return count
 
@@ -84,18 +75,12 @@ def extract_text(file_path, filename):
 
         elif filename_lower.endswith(".txt"):
 
-            with open(
-                file_path,
-                "r",
-                encoding="utf-8"
-            ) as file:
+            with open(file_path, "r", encoding="utf-8") as file:
                 text = file.read()
 
     except Exception as error:
 
-        print(
-            f"[ERROR] Could not read {filename}: {error}"
-        )
+        print(f"[ERROR] Could not read {filename}: {error}")
 
     return text.lower()
 
@@ -123,55 +108,33 @@ def extract_pages(file_path, filename):
 
                 reader = PyPDF2.PdfReader(file)
 
-                for page_number, page in enumerate(
-                    reader.pages,
-                    start=1
-                ):
+                for page_number, page in enumerate(reader.pages, start=1):
 
                     extracted = page.extract_text()
 
                     if extracted:
-                        pages.append({
-                            "page": page_number,
-                            "text": extracted.lower()
-                        })
+                        pages.append({"page": page_number, "text": extracted.lower()})
 
         elif filename_lower.endswith(".docx"):
 
             document = docx.Document(file_path)
 
-            text = "\n".join(
-                paragraph.text
-                for paragraph in document.paragraphs
-            )
+            text = "\n".join(paragraph.text for paragraph in document.paragraphs)
 
             if text.strip():
-                pages.append({
-                    "page": 1,
-                    "text": text.lower()
-                })
+                pages.append({"page": 1, "text": text.lower()})
 
         elif filename_lower.endswith(".txt"):
 
-            with open(
-                file_path,
-                "r",
-                encoding="utf-8"
-            ) as file:
+            with open(file_path, "r", encoding="utf-8") as file:
 
                 text = file.read()
 
                 if text.strip():
-                    pages.append({
-                        "page": 1,
-                        "text": text.lower()
-                    })
+                    pages.append({"page": 1, "text": text.lower()})
 
     except Exception as error:
 
-        print(
-            f"[ERROR] Could not extract pages from "
-            f"{filename}: {error}"
-        )
+        print(f"[ERROR] Could not extract pages from " f"{filename}: {error}")
 
     return pages

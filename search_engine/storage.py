@@ -84,9 +84,7 @@ def get_sqlite_connection(db_path):
         timeout=30,
     )
 
-    connection.execute(
-        "PRAGMA foreign_keys = ON"
-    )
+    connection.execute("PRAGMA foreign_keys = ON")
 
     return connection
 
@@ -112,21 +110,13 @@ def sync_sqlite_from_memory(
         close_connection = True
 
     try:
-        connection.execute(
-            "DELETE FROM term_postings"
-        )
+        connection.execute("DELETE FROM term_postings")
 
-        connection.execute(
-            "DELETE FROM filename_terms"
-        )
+        connection.execute("DELETE FROM filename_terms")
 
-        connection.execute(
-            "DELETE FROM pages"
-        )
+        connection.execute("DELETE FROM pages")
 
-        connection.execute(
-            "DELETE FROM documents"
-        )
+        connection.execute("DELETE FROM documents")
 
         for filename, metadata in document_metadata.items():
 
@@ -159,8 +149,7 @@ def sync_sqlite_from_memory(
                         filename,
                         count,
                     )
-                    for filename, count
-                    in posting_list.items()
+                    for filename, count in posting_list.items()
                 ],
             )
 
@@ -187,8 +176,7 @@ def sync_sqlite_from_memory(
                         position,
                         term,
                     )
-                    for position, term
-                    in enumerate(filename_words)
+                    for position, term in enumerate(filename_words)
                 ],
             )
 
@@ -321,8 +309,7 @@ def replace_document_rows(
                 position,
                 term,
             )
-            for position, term
-            in enumerate(filename_words)
+            for position, term in enumerate(filename_words)
         ],
     )
 
@@ -351,8 +338,7 @@ def load_database_from_sqlite(*, db_path):
 
     with get_sqlite_connection(db_path) as connection:
 
-        document_rows = connection.execute(
-            """
+        document_rows = connection.execute("""
             SELECT
                 filename,
                 title,
@@ -360,8 +346,7 @@ def load_database_from_sqlite(*, db_path):
                 total_words,
                 page_count
             FROM documents
-            """
-        ).fetchall()
+            """).fetchall()
 
         if not document_rows:
             return None
@@ -385,15 +370,13 @@ def load_database_from_sqlite(*, db_path):
 
         new_inverted_index = {}
 
-        posting_rows = connection.execute(
-            """
+        posting_rows = connection.execute("""
             SELECT
                 term,
                 filename,
                 term_count
             FROM term_postings
-            """
-        ).fetchall()
+            """).fetchall()
 
         for (
             term,
@@ -404,21 +387,17 @@ def load_database_from_sqlite(*, db_path):
             if term not in new_inverted_index:
                 new_inverted_index[term] = {}
 
-            new_inverted_index[term][
-                filename
-            ] = term_count
+            new_inverted_index[term][filename] = term_count
 
         new_filename_index = {}
 
-        filename_rows = connection.execute(
-            """
+        filename_rows = connection.execute("""
             SELECT
                 filename,
                 term
             FROM filename_terms
             ORDER BY filename, position
-            """
-        ).fetchall()
+            """).fetchall()
 
         for filename, term in filename_rows:
 
@@ -429,16 +408,14 @@ def load_database_from_sqlite(*, db_path):
 
         new_page_text_index = {}
 
-        page_rows = connection.execute(
-            """
+        page_rows = connection.execute("""
             SELECT
                 filename,
                 page_number,
                 text
             FROM pages
             ORDER BY filename, page_number
-            """
-        ).fetchall()
+            """).fetchall()
 
         for (
             filename,
@@ -449,10 +426,12 @@ def load_database_from_sqlite(*, db_path):
             new_page_text_index.setdefault(
                 filename,
                 [],
-            ).append({
-                "page": page_number,
-                "text": text,
-            })
+            ).append(
+                {
+                    "page": page_number,
+                    "text": text,
+                }
+            )
 
         return {
             "inverted_index": new_inverted_index,
@@ -501,22 +480,13 @@ def load_json_snapshot(
 
         try:
 
-            with open(
-                index_file,
-                "r",
-                encoding="utf-8"
-            ) as file:
+            with open(index_file, "r", encoding="utf-8") as file:
 
-                loaded_inverted_index = json.load(
-                    file
-                )
+                loaded_inverted_index = json.load(file)
 
         except Exception as error:
 
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"content index: {error}"
-            )
+            print(f"[DATABASE ERROR] Could not load " f"content index: {error}")
 
             loaded_inverted_index = {}
 
@@ -524,22 +494,13 @@ def load_json_snapshot(
 
         try:
 
-            with open(
-                meta_file,
-                "r",
-                encoding="utf-8"
-            ) as file:
+            with open(meta_file, "r", encoding="utf-8") as file:
 
-                loaded_document_metadata = json.load(
-                    file
-                )
+                loaded_document_metadata = json.load(file)
 
         except Exception as error:
 
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"metadata: {error}"
-            )
+            print(f"[DATABASE ERROR] Could not load " f"metadata: {error}")
 
             loaded_document_metadata = {}
 
@@ -547,22 +508,13 @@ def load_json_snapshot(
 
         try:
 
-            with open(
-                filename_index_file,
-                "r",
-                encoding="utf-8"
-            ) as file:
+            with open(filename_index_file, "r", encoding="utf-8") as file:
 
-                loaded_filename_index = json.load(
-                    file
-                )
+                loaded_filename_index = json.load(file)
 
         except Exception as error:
 
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"filename index: {error}"
-            )
+            print(f"[DATABASE ERROR] Could not load " f"filename index: {error}")
 
             loaded_filename_index = {}
 
@@ -570,22 +522,13 @@ def load_json_snapshot(
 
         try:
 
-            with open(
-                page_text_file,
-                "r",
-                encoding="utf-8"
-            ) as file:
+            with open(page_text_file, "r", encoding="utf-8") as file:
 
-                loaded_page_text_index = json.load(
-                    file
-                )
+                loaded_page_text_index = json.load(file)
 
         except Exception as error:
 
-            print(
-                f"[DATABASE ERROR] Could not load "
-                f"page text index: {error}"
-            )
+            print(f"[DATABASE ERROR] Could not load " f"page text index: {error}")
 
             loaded_page_text_index = {}
 
@@ -677,9 +620,7 @@ def create_schema(connection):
     one connection, which is what app.py did before this was extracted.
     """
 
-    connection.executescript(
-        SQLITE_SCHEMA
-    )
+    connection.executescript(SQLITE_SCHEMA)
 
 
 # The schema revision that gave `filename_terms` an explicit `position`.
@@ -691,9 +632,7 @@ FILENAME_TERM_POSITION_SCHEMA = 2
 def filename_term_columns(connection):
     """Return the column names of `filename_terms`, or [] if absent."""
 
-    rows = connection.execute(
-        "PRAGMA table_info(filename_terms)"
-    ).fetchall()
+    rows = connection.execute("PRAGMA table_info(filename_terms)").fetchall()
 
     return [row[1] for row in rows]
 
@@ -712,21 +651,17 @@ def natural_filename_terms(filename, tokenize_filename):
     engine says they are.
     """
 
-    return tokenize_filename(
-        os.path.splitext(filename)[0]
-    )
+    return tokenize_filename(os.path.splitext(filename)[0])
 
 
 def _read_filename_terms(connection):
     """Return {filename: [(position, term), ...]} in stored order."""
 
-    rows = connection.execute(
-        """
+    rows = connection.execute("""
         SELECT filename, position, term
         FROM filename_terms
         ORDER BY filename, position
-        """
-    ).fetchall()
+        """).fetchall()
 
     stored = {}
 
@@ -768,27 +703,21 @@ def migrate_filename_terms(connection, *, tokenize_filename):
         # SQLite cannot alter a primary key, so the table is rebuilt.
         # `filename_terms` holds only derived data, so nothing is lost:
         # every row is regenerated from `documents` below.
-        connection.execute(
-            "DROP TABLE IF EXISTS filename_terms"
-        )
+        connection.execute("DROP TABLE IF EXISTS filename_terms")
 
-        connection.execute(
-            """
+        connection.execute("""
             CREATE TABLE filename_terms (
                 filename TEXT NOT NULL,
                 position INTEGER NOT NULL,
                 term TEXT NOT NULL,
                 PRIMARY KEY (filename, position)
             )
-            """
-        )
+            """)
 
-        connection.execute(
-            """
+        connection.execute("""
             CREATE INDEX IF NOT EXISTS idx_filename_terms_term
             ON filename_terms(term)
-            """
-        )
+            """)
 
     documents = connection.execute(
         "SELECT filename FROM documents ORDER BY filename"
@@ -810,10 +739,7 @@ def migrate_filename_terms(connection, *, tokenize_filename):
         # Compare the term sequence only. Positions are rewritten from
         # scratch, so a correct sequence under wrong positions still
         # counts as correct once the rows are replaced below.
-        if (
-            not schema_changed
-            and [term for _position, term in existing] == expected
-        ):
+        if not schema_changed and [term for _position, term in existing] == expected:
             continue
 
         connection.execute(
@@ -827,10 +753,7 @@ def migrate_filename_terms(connection, *, tokenize_filename):
             (filename, position, term)
             VALUES (?, ?, ?)
             """,
-            [
-                (filename, position, term)
-                for position, term in enumerate(expected)
-            ],
+            [(filename, position, term) for position, term in enumerate(expected)],
         )
 
         repaired.append(filename)
@@ -856,6 +779,4 @@ def migrate_filename_terms(connection, *, tokenize_filename):
 def count_documents(connection):
     """Return the number of rows in `documents`."""
 
-    return connection.execute(
-        "SELECT COUNT(*) FROM documents"
-    ).fetchone()[0]
+    return connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0]

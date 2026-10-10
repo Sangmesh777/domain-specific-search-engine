@@ -162,10 +162,7 @@ GOLDEN_CORPUS = [
     {
         "name": "minimal_note.txt",
         "format": FORMAT_TXT,
-        "text": (
-            "Minimal note\n"
-            "sharedterm appears in the minimal note.\n"
-        ),
+        "text": ("Minimal note\n" "sharedterm appears in the minimal note.\n"),
     },
 ]
 

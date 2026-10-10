@@ -70,19 +70,14 @@ def extract_document(file_path, filename):
     term_counts = {}
 
     for word in content_words:
-        term_counts[word] = (
-            term_counts.get(word, 0)
-            + 1
-        )
+        term_counts[word] = term_counts.get(word, 0) + 1
 
     pages = extract_pages(
         file_path,
         filename,
     )
 
-    filename_words = tokenize_filename(
-        os.path.splitext(filename)[0]
-    )
+    filename_words = tokenize_filename(os.path.splitext(filename)[0])
 
     if not content_words:
         return None
@@ -117,16 +112,11 @@ def resolve_document_path(
     data_root = os.path.realpath(data_folder)
 
     requested_path = os.path.realpath(
-        os.path.join(
-            data_folder,
-            os.path.basename(filename)
-        )
+        os.path.join(data_folder, os.path.basename(filename))
     )
 
     try:
-        if os.path.commonpath(
-            [data_root, requested_path]
-        ) != data_root:
+        if os.path.commonpath([data_root, requested_path]) != data_root:
             return None
     except ValueError:
         return None
@@ -163,9 +153,7 @@ def build_index_from_folder(
 
     for filename in os.listdir(data_folder):
 
-        if not filename.lower().endswith(
-            supported_extensions
-        ):
+        if not filename.lower().endswith(supported_extensions):
             continue
 
         file_path = os.path.join(
@@ -173,9 +161,7 @@ def build_index_from_folder(
             filename,
         )
 
-        print(
-            f"[REBUILD] Indexing: {filename}"
-        )
+        print(f"[REBUILD] Indexing: {filename}")
 
         try:
             extracted = extract_document(
@@ -184,21 +170,14 @@ def build_index_from_folder(
             )
 
             if extracted is None:
-                print(
-                    "[REBUILD] Skipped empty document: "
-                    f"{filename}"
-                )
+                print("[REBUILD] Skipped empty document: " f"{filename}")
                 continue
 
             new_document_metadata[filename] = extracted["metadata"]
 
-            new_filename_index[
-                filename
-            ] = extracted["filename_words"]
+            new_filename_index[filename] = extracted["filename_words"]
 
-            new_page_text_index[
-                filename
-            ] = extracted["pages"]
+            new_page_text_index[filename] = extracted["pages"]
 
             for word, count in extracted["term_counts"].items():
 
@@ -209,10 +188,7 @@ def build_index_from_folder(
 
         except Exception as error:
 
-            print(
-                f"[REBUILD ERROR] Could not index "
-                f"{filename}: {error}"
-            )
+            print(f"[REBUILD ERROR] Could not index " f"{filename}: {error}")
 
             continue
 

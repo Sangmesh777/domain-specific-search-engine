@@ -36,12 +36,31 @@ sys.path.insert(0, os.getcwd())
 
 from tests.test_sanitizer_independence import CASES  # noqa: E402
 
-
 NAMES = (
-    "CON", "con", "Con", "NUL", "NUL.txt", "com1.pdf", "LPT9", "LPT9.docx",
-    "PRN.txt", "AUX", "CONIN$", "CONOUT$", "COM\u00b9.txt", "LPT\u00b2.txt",
-    "CONSOLE.txt", "NULL.txt", "NULX.txt", "command.txt", "com0.txt",
-    "COM10.txt", "con.TXT", "nul.pdf", "aux.docx", "prn.txt",
+    "CON",
+    "con",
+    "Con",
+    "NUL",
+    "NUL.txt",
+    "com1.pdf",
+    "LPT9",
+    "LPT9.docx",
+    "PRN.txt",
+    "AUX",
+    "CONIN$",
+    "CONOUT$",
+    "COM\u00b9.txt",
+    "LPT\u00b2.txt",
+    "CONSOLE.txt",
+    "NULL.txt",
+    "NULX.txt",
+    "command.txt",
+    "com0.txt",
+    "COM10.txt",
+    "con.TXT",
+    "nul.pdf",
+    "aux.docx",
+    "prn.txt",
 )
 
 

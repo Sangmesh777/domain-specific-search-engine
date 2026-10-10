@@ -43,6 +43,8 @@ from search_engine.text import (
     parse_filetype_filter,
     tokenize_filename,
 )
+
+
 def build_paginated_response(
     results,
     page,
@@ -57,61 +59,32 @@ def build_paginated_response(
 
     total = len(results)
 
-    total_pages = (
-        (total + limit - 1) // limit
-        if total > 0
-        else 0
-    )
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
 
     if total_pages > 0:
-        page = max(
-            1,
-            min(page, total_pages)
-        )
+        page = max(1, min(page, total_pages))
     else:
         page = max(1, page)
 
-    start_index = (
-        (page - 1) * limit
-        if total_pages > 0
-        else 0
-    )
+    start_index = (page - 1) * limit if total_pages > 0 else 0
 
-    end_index = (
-        start_index + limit
-    )
+    end_index = start_index + limit
 
-    page_results = results[
-        start_index:end_index
-    ]
+    page_results = results[start_index:end_index]
 
-    return ({
+    return {
         "results": page_results,
         "pagination": {
             "page": page,
             "limit": limit,
             "total": total,
             "total_pages": total_pages,
-            "has_next":
-                page < total_pages,
-            "has_previous":
-                page > 1
-                and total_pages > 0,
-            "start":
-                (
-                    start_index + 1
-                    if page_results
-                    else 0
-                ),
-            "end":
-                (
-                    start_index
-                    + len(page_results)
-                    if page_results
-                    else 0
-                ),
+            "has_next": page < total_pages,
+            "has_previous": page > 1 and total_pages > 0,
+            "start": (start_index + 1 if page_results else 0),
+            "end": (start_index + len(page_results) if page_results else 0),
         },
-    })
+    }
 
 
 def search_index(
@@ -127,7 +100,7 @@ def search_index(
     raw_query = raw_query_text.strip()
 
     if not raw_query:
-        return ({
+        return {
             "results": [],
             "pagination": {
                 "page": 1,
@@ -135,9 +108,9 @@ def search_index(
                 "total": 0,
                 "total_pages": 0,
                 "has_next": False,
-                "has_previous": False
-            }
-        })
+                "has_previous": False,
+            },
+        }
 
     try:
         requested_page = int(page_text)
@@ -149,16 +122,9 @@ def search_index(
     except (TypeError, ValueError):
         requested_limit = 10
 
-    requested_result_page = max(
-        1,
-        requested_page
-    )
+    requested_result_page = max(1, requested_page)
 
-    limit = min(
-        50,
-        max(1, requested_limit)
-    )
-
+    limit = min(50, max(1, requested_limit))
 
     # Normalize document extensions before tokenization.
     # Examples:
@@ -167,52 +133,28 @@ def search_index(
     # become:
     #   BCS502 Module 2
     #   "BCS502 Module 2"
-    keyword_query, filetype_filter = parse_filetype_filter(
-        raw_query
-    )
+    keyword_query, filetype_filter = parse_filetype_filter(raw_query)
 
-    normalized_query_text = normalize_search_query(
-        keyword_query
-    )
+    normalized_query_text = normalize_search_query(keyword_query)
 
     query = normalized_query_text.lower()
 
     quoted_phrase = None
 
-    if (
-        len(query) >= 2
-        and query.startswith('"')
-        and query.endswith('"')
-    ):
+    if len(query) >= 2 and query.startswith('"') and query.endswith('"'):
 
-        quoted_phrase = query[
-            1:-1
-        ].strip()
+        quoted_phrase = query[1:-1].strip()
 
-    search_words = tokenize_filename(
-        query
-    )
+    search_words = tokenize_filename(query)
 
-    if (
-        not search_words
-        and
-        not filetype_filter
-    ):
-        return build_paginated_response(
-            [],
-            requested_result_page,
-            limit
-        )
+    if not search_words and not filetype_filter:
+        return build_paginated_response([], requested_result_page, limit)
 
     # Keep numeric tokens searchable. A query such as "999" must be
     # able to match an indexed token containing 999. The tokenizer already
     # preserves numeric tokens; removing them here made them unreachable
     # from the content index.
-    content_query_words = [
-        word
-        for word in search_words
-        if len(word) > 1
-    ]
+    content_query_words = [word for word in search_words if len(word) > 1]
 
     # --------------------------------------------------------
     # FILE-TYPE-ONLY QUERY
@@ -228,117 +170,54 @@ def search_index(
 
         for filename, metadata in active_document_metadata.items():
 
-            extension = os.path.splitext(
-                filename
-            )[1].lower().lstrip(".")
+            extension = os.path.splitext(filename)[1].lower().lstrip(".")
 
             if extension != filetype_filter:
                 continue
 
-            document_url = (
-                "/api/documents/"
-                +
-                quote(
-                    filename,
-                    safe=""
-                )
+            document_url = "/api/documents/" + quote(filename, safe="")
+
+            filtered_results.append(
+                {
+                    "title": metadata["title"],
+                    "path": metadata["path"],
+                    "document_url": document_url,
+                    "page_url": document_url,
+                    "open_url": document_url,
+                    "snippet": (
+                        f"Filtered by file type: " f"{filetype_filter.upper()}"
+                    ),
+                    "page": None,
+                    "highlights": [],
+                    "filename_score": 0.0,
+                    "content_score": 0.0,
+                    "phrase_score": 0.0,
+                    "phrase_occurrences": 0,
+                    "score": 1.0,
+                    "relevance_score": 1.0,
+                    "match_type": (f"File Type: " f"{filetype_filter.upper()}"),
+                    "filetype_filter": filetype_filter,
+                    "tag": "Filtered Result",
+                }
             )
 
-            filtered_results.append({
+        filtered_results.sort(key=lambda item: item["title"].lower())
 
-                "title":
-                    metadata["title"],
+        return build_paginated_response(filtered_results, requested_result_page, limit)
 
-                "path":
-                    metadata["path"],
-
-                "document_url":
-                    document_url,
-
-                "page_url":
-                    document_url,
-
-                "open_url":
-                    document_url,
-
-                "snippet":
-                    (
-                        f"Filtered by file type: "
-                        f"{filetype_filter.upper()}"
-                    ),
-
-                "page":
-                    None,
-
-                "highlights":
-                    [],
-
-                "filename_score":
-                    0.0,
-
-                "content_score":
-                    0.0,
-
-                "phrase_score":
-                    0.0,
-
-                "phrase_occurrences":
-                    0,
-
-                "score":
-                    1.0,
-
-                "relevance_score":
-                    1.0,
-
-                "match_type":
-                    (
-                        f"File Type: "
-                        f"{filetype_filter.upper()}"
-                    ),
-
-                "filetype_filter":
-                    filetype_filter,
-
-                "tag":
-                    "Filtered Result"
-
-            })
-
-        filtered_results.sort(
-            key=lambda item:
-                item["title"].lower()
-        )
-
-        return build_paginated_response(
-            filtered_results,
-            requested_result_page,
-            limit
-        )
-
-    normalized_query = " ".join(
-        search_words
-    )
+    normalized_query = " ".join(search_words)
 
     if quoted_phrase:
 
-        phrase_words = tokenize_filename(
-            quoted_phrase
-        )
+        phrase_words = tokenize_filename(quoted_phrase)
 
     else:
 
-        phrase_words = list(
-            search_words
-        )
+        phrase_words = list(search_words)
 
-    normalized_phrase = " ".join(
-        phrase_words
-    )
+    normalized_phrase = " ".join(phrase_words)
 
-    phrase_query = (
-        len(phrase_words) >= 2
-    )
+    phrase_query = len(phrase_words) >= 2
 
     if not search_words:
         phrase_query = False
@@ -348,20 +227,15 @@ def search_index(
         total_documents = sum(
             1
             for filename in active_document_metadata
-            if os.path.splitext(filename)[1]
-            .lower()
-            .lstrip(".")
-            == filetype_filter
+            if os.path.splitext(filename)[1].lower().lstrip(".") == filetype_filter
         )
 
     else:
 
-        total_documents = len(
-            active_document_metadata
-        )
+        total_documents = len(active_document_metadata)
 
     if total_documents == 0:
-        return ([])
+        return []
 
     # --------------------------------------------------------
     # SCORE STORAGE
@@ -372,28 +246,17 @@ def search_index(
     for filename in active_document_metadata:
 
         document_scores[filename] = {
-
             "filename_score": 0.0,
-
             "content_score": 0.0,
-
             "phrase_score": 0.0,
-
             "phrase_occurrences": 0,
-
             "filename_matches": [],
-
             "content_matches": [],
-
             "phrase_match": False,
-
             # Explicit content-match hierarchy.
             "exact_content_match": False,
-
             "best_prefix_similarity": 0.0,
-
-            "best_numeric_similarity": 0.0
-
+            "best_numeric_similarity": 0.0,
         }
 
     def filetype_allowed(filename):
@@ -401,9 +264,7 @@ def search_index(
         if not filetype_filter:
             return True
 
-        extension = os.path.splitext(
-            filename
-        )[1].lower().lstrip(".")
+        extension = os.path.splitext(filename)[1].lower().lstrip(".")
 
         return extension == filetype_filter
 
@@ -411,54 +272,30 @@ def search_index(
     # FILENAME SEARCH
     # --------------------------------------------------------
 
-    for filename, filename_words in (
-        active_filename_index.items()
-    ):
+    for filename, filename_words in active_filename_index.items():
 
         if not filetype_allowed(filename):
             continue
 
-        normalized_filename = " ".join(
-            filename_words
-        )
+        normalized_filename = " ".join(filename_words)
 
-        if (
-            normalized_query
-            ==
-            normalized_filename
-        ):
+        if normalized_query == normalized_filename:
 
-            document_scores[
-                filename
-            ]["filename_score"] += 100.0
+            document_scores[filename]["filename_score"] += 100.0
 
-        elif (
-            len(search_words) >= 2
-            and
-            normalized_query
-            in normalized_filename
-        ):
+        elif len(search_words) >= 2 and normalized_query in normalized_filename:
 
-            document_scores[
-                filename
-            ]["filename_score"] += 50.0
+            document_scores[filename]["filename_score"] += 50.0
 
         if (
             quoted_phrase
-            and
-            normalized_phrase
-            and
-            normalized_phrase
-            in normalized_filename
+            and normalized_phrase
+            and normalized_phrase in normalized_filename
         ):
 
-            document_scores[
-                filename
-            ]["phrase_score"] += 30.0
+            document_scores[filename]["phrase_score"] += 30.0
 
-            document_scores[
-                filename
-            ]["phrase_match"] = True
+            document_scores[filename]["phrase_match"] = True
 
         for word in search_words:
 
@@ -475,31 +312,18 @@ def search_index(
 
                 has_related_filename_word = any(
                     query_word in filename_words
-                    for query_word
-                    in non_numeric_query_words
+                    for query_word in non_numeric_query_words
                 )
 
-                if (
-                    non_numeric_query_words
-                    and
-                    not has_related_filename_word
-                ):
+                if non_numeric_query_words and not has_related_filename_word:
 
                     continue
 
-            document_scores[
-                filename
-            ]["filename_score"] += 20.0
+            document_scores[filename]["filename_score"] += 20.0
 
-            if word not in document_scores[
-                filename
-            ]["filename_matches"]:
+            if word not in document_scores[filename]["filename_matches"]:
 
-                document_scores[
-                    filename
-                ]["filename_matches"].append(
-                    word
-                )
+                document_scores[filename]["filename_matches"].append(word)
 
     # --------------------------------------------------------
     # CONTENT TF-IDF
@@ -521,9 +345,7 @@ def search_index(
     # identifier/code. Exact matches remain strongest, prefix matches are
     # next, and numeric-substring matches receive a lower lexical weight.
 
-    indexed_terms = list(
-        active_inverted_index.keys()
-    )
+    indexed_terms = list(active_inverted_index.keys())
 
     for word in content_query_words:
 
@@ -534,12 +356,7 @@ def search_index(
         # ----------------------------------------------------
         if word in active_inverted_index:
 
-            matching_terms.append(
-                (
-                    word,
-                    1.0
-                )
-            )
+            matching_terms.append((word, 1.0))
 
         # ----------------------------------------------------
         # PREFIX TOKEN
@@ -557,26 +374,11 @@ def search_index(
                 if not term:
                     continue
 
-                prefix_similarity = (
-                    len(word)
-                    /
-                    float(len(term))
-                )
+                prefix_similarity = len(word) / float(len(term))
 
-                prefix_similarity = min(
-                    0.90,
-                    max(
-                        0.25,
-                        prefix_similarity
-                    )
-                )
+                prefix_similarity = min(0.90, max(0.25, prefix_similarity))
 
-                matching_terms.append(
-                    (
-                        term,
-                        prefix_similarity
-                    )
-                )
+                matching_terms.append((term, prefix_similarity))
 
         # ----------------------------------------------------
         # NUMERIC SUBSTRING
@@ -596,70 +398,33 @@ def search_index(
                 if term.startswith(word):
                     continue
 
-                substring_similarity = (
-                    len(word)
-                    /
-                    float(len(term))
-                )
+                substring_similarity = len(word) / float(len(term))
 
-                substring_similarity = min(
-                    0.65,
-                    max(
-                        0.20,
-                        substring_similarity * 0.70
-                    )
-                )
+                substring_similarity = min(0.65, max(0.20, substring_similarity * 0.70))
 
-                matching_terms.append(
-                    (
-                        term,
-                        substring_similarity
-                    )
-                )
+                matching_terms.append((term, substring_similarity))
 
         # Keep the strongest matching interpretation for each indexed term.
         best_term_weights = {}
 
-        for (
-            term,
-            match_weight
-        ) in matching_terms:
+        for term, match_weight in matching_terms:
 
-            current_weight = (
-                best_term_weights.get(
-                    term,
-                    0.0
-                )
-            )
+            current_weight = best_term_weights.get(term, 0.0)
 
             if match_weight > current_weight:
 
-                best_term_weights[
-                    term
-                ] = match_weight
+                best_term_weights[term] = match_weight
 
-        for (
-            term,
-            match_weight
-        ) in best_term_weights.items():
+        for term, match_weight in best_term_weights.items():
 
-            docs_containing_word = len(
-                active_inverted_index[term]
-            )
+            docs_containing_word = len(active_inverted_index[term])
 
             if docs_containing_word == 0:
                 continue
 
-            idf = math.log(
-                (total_documents + 1)
-                /
-                (docs_containing_word + 1)
-            ) + 1
+            idf = math.log((total_documents + 1) / (docs_containing_word + 1)) + 1
 
-            for (
-                filename,
-                term_count
-            ) in active_inverted_index[term].items():
+            for filename, term_count in active_inverted_index[term].items():
 
                 if not filetype_allowed(filename):
                     continue
@@ -667,30 +432,16 @@ def search_index(
                 if filename not in active_document_metadata:
                     continue
 
-                total_words = active_document_metadata[
-                    filename
-                ]["total_words"]
+                total_words = active_document_metadata[filename]["total_words"]
 
                 if total_words == 0:
                     continue
 
-                tf = (
-                    term_count
-                    /
-                    float(total_words)
-                )
+                tf = term_count / float(total_words)
 
-                tfidf = (
-                    tf
-                    *
-                    idf
-                    *
-                    match_weight
-                )
+                tfidf = tf * idf * match_weight
 
-                document_scores[
-                    filename
-                ]["content_score"] += tfidf
+                document_scores[filename]["content_score"] += tfidf
 
                 # --------------------------------------------
                 # Explicit lexical match hierarchy
@@ -709,41 +460,25 @@ def search_index(
                 # final ranking does not lose lexical intent merely
                 # because one document contains a term frequently.
                 if term == word:
-                    document_scores[
-                        filename
-                    ]["exact_content_match"] = True
+                    document_scores[filename]["exact_content_match"] = True
 
                 elif word.isdigit() and word in term:
-                    document_scores[
-                        filename
-                    ]["best_numeric_similarity"] = max(
-                        document_scores[
-                            filename
-                        ]["best_numeric_similarity"],
-                        match_weight
+                    document_scores[filename]["best_numeric_similarity"] = max(
+                        document_scores[filename]["best_numeric_similarity"],
+                        match_weight,
                     )
 
                 elif term.startswith(word):
-                    document_scores[
-                        filename
-                    ]["best_prefix_similarity"] = max(
-                        document_scores[
-                            filename
-                        ]["best_prefix_similarity"],
-                        match_weight
+                    document_scores[filename]["best_prefix_similarity"] = max(
+                        document_scores[filename]["best_prefix_similarity"],
+                        match_weight,
                     )
 
-                if word not in document_scores[
-                    filename
-                ]["content_matches"]:
+                if word not in document_scores[filename]["content_matches"]:
 
-                    document_scores[
-                        filename
-                    ]["content_matches"].append(
-                        word
-                    )
+                    document_scores[filename]["content_matches"].append(word)
 
-# --------------------------------------------------------
+    # --------------------------------------------------------
     # PHRASE SEARCH
     # --------------------------------------------------------
 
@@ -754,15 +489,9 @@ def search_index(
             if not filetype_allowed(filename):
                 continue
 
-            pages = active_page_text_index.get(
-                filename,
-                []
-            )
+            pages = active_page_text_index.get(filename, [])
 
-            normalized_page_text = " ".join(
-                page["text"]
-                for page in pages
-            ).lower()
+            normalized_page_text = " ".join(page["text"] for page in pages).lower()
 
             # ------------------------------------------------
             # Count exact phrase occurrences in document text.
@@ -771,17 +500,12 @@ def search_index(
             # ------------------------------------------------
 
             phrase_occurrences = count_phrase_occurrences(
-                normalized_page_text,
-                normalized_phrase
+                normalized_page_text, normalized_phrase
             )
 
             if phrase_occurrences > 0:
 
-                document_scores[
-                    filename
-                ]["phrase_occurrences"] = (
-                    phrase_occurrences
-                )
+                document_scores[filename]["phrase_occurrences"] = phrase_occurrences
 
                 # Exact phrase frequency uses a logarithmic
                 # curve. More exact occurrences increase
@@ -806,69 +530,32 @@ def search_index(
                 else:
 
                     frequency_ratio = min(
-                        math.log(
-                            phrase_occurrences
-                        )
-                        /
-                        math.log(
-                            max_frequency_reference
-                        ),
-                        1.0
+                        math.log(phrase_occurrences)
+                        / math.log(max_frequency_reference),
+                        1.0,
                     )
 
-                    content_phrase_score = (
-                        50.0
-                        +
-                        (
-                            50.0
-                            *
-                            frequency_ratio
-                        )
-                    )
+                    content_phrase_score = 50.0 + (50.0 * frequency_ratio)
 
-                content_phrase_score = min(
-                    content_phrase_score,
-                    100.0
+                content_phrase_score = min(content_phrase_score, 100.0)
+
+                document_scores[filename]["phrase_score"] = max(
+                    document_scores[filename]["phrase_score"], content_phrase_score
                 )
 
-                document_scores[
-                    filename
-                ]["phrase_score"] = max(
-                    document_scores[
-                        filename
-                    ]["phrase_score"],
-                    content_phrase_score
-                )
+                document_scores[filename]["phrase_match"] = True
 
-                document_scores[
-                    filename
-                ]["phrase_match"] = True
+            filename_words = active_filename_index.get(filename, [])
 
-            filename_words = active_filename_index.get(
-                filename,
-                []
-            )
-
-            normalized_filename = " ".join(
-                filename_words
-            )
+            normalized_filename = " ".join(filename_words)
 
             # Exact phrase inside the filename is a separate,
             # stronger filename signal.
-            if (
-                normalized_phrase
-                and
-                normalized_phrase
-                in normalized_filename
-            ):
+            if normalized_phrase and normalized_phrase in normalized_filename:
 
-                document_scores[
-                    filename
-                ]["phrase_score"] += 100.0
+                document_scores[filename]["phrase_score"] += 100.0
 
-                document_scores[
-                    filename
-                ]["phrase_match"] = True
+                document_scores[filename]["phrase_match"] = True
 
     # --------------------------------------------------------
     # Explicit quoted phrase filter
@@ -878,49 +565,32 @@ def search_index(
 
         phrase_documents = {
             filename
-            for filename, scores
-            in document_scores.items()
+            for filename, scores in document_scores.items()
             if scores["phrase_match"]
         }
 
         if phrase_documents:
 
-            for filename in list(
-                document_scores.keys()
-            ):
+            for filename in list(document_scores.keys()):
 
                 if filename not in phrase_documents:
 
-                    document_scores.pop(
-                        filename
-                    )
+                    document_scores.pop(filename)
 
         else:
 
-            return ([])
+            return []
 
     # --------------------------------------------------------
     # Strongest content score
     # --------------------------------------------------------
 
     max_content_score = max(
-
-        (
-            scores["content_score"]
-            for scores
-            in document_scores.values()
-        ),
-
-        default=0.0
+        (scores["content_score"] for scores in document_scores.values()), default=0.0
     )
 
     query_has_filename_signal = any(
-
-        scores["filename_score"] > 0
-
-        for scores
-        in document_scores.values()
-
+        scores["filename_score"] > 0 for scores in document_scores.values()
     )
 
     # --------------------------------------------------------
@@ -931,61 +601,33 @@ def search_index(
 
         document_scores = {
             filename: scores
-            for filename, scores
-            in document_scores.items()
+            for filename, scores in document_scores.items()
             if filetype_allowed(filename)
         }
 
         if not document_scores:
-            return ([])
+            return []
 
         max_content_score = max(
-            (
-                scores["content_score"]
-                for scores
-                in document_scores.values()
-            ),
-            default=0.0
+            (scores["content_score"] for scores in document_scores.values()),
+            default=0.0,
         )
 
     ranked_documents = []
 
-    for filename, scores in (
-        document_scores.items()
-    ):
+    for filename, scores in document_scores.items():
 
-        filename_score = scores[
-            "filename_score"
-        ]
+        filename_score = scores["filename_score"]
 
-        content_score = scores[
-            "content_score"
-        ]
+        content_score = scores["content_score"]
 
-        phrase_score = scores[
-            "phrase_score"
-        ]
+        phrase_score = scores["phrase_score"]
 
-        exact_content_match = bool(
-            scores.get(
-                "exact_content_match",
-                False
-            )
-        )
+        exact_content_match = bool(scores.get("exact_content_match", False))
 
-        best_prefix_similarity = float(
-            scores.get(
-                "best_prefix_similarity",
-                0.0
-            )
-        )
+        best_prefix_similarity = float(scores.get("best_prefix_similarity", 0.0))
 
-        best_numeric_similarity = float(
-            scores.get(
-                "best_numeric_similarity",
-                0.0
-            )
-        )
+        best_numeric_similarity = float(scores.get("best_numeric_similarity", 0.0))
 
         # Explicit lexical hierarchy:
         #
@@ -1000,71 +642,37 @@ def search_index(
         if exact_content_match:
             lexical_match_relevance = 1.00
         elif best_prefix_similarity > 0:
-            lexical_match_relevance = (
-                0.70
-                +
-                (0.30 * best_prefix_similarity)
-            )
+            lexical_match_relevance = 0.70 + (0.30 * best_prefix_similarity)
         elif best_numeric_similarity > 0:
-            lexical_match_relevance = (
-                0.30
-                +
-                (0.40 * best_numeric_similarity)
-            )
+            lexical_match_relevance = 0.30 + (0.40 * best_numeric_similarity)
         else:
             lexical_match_relevance = 0.0
 
-        filename_words = active_filename_index.get(
-            filename,
-            []
-        )
+        filename_words = active_filename_index.get(filename, [])
 
-        normalized_filename = " ".join(
-            filename_words
-        )
+        normalized_filename = " ".join(filename_words)
 
-        matched_word_count = sum(
-            1
-            for word in search_words
-            if word in filename_words
-        )
+        matched_word_count = sum(1 for word in search_words if word in filename_words)
 
         if search_words:
 
-            query_word_coverage = (
-                matched_word_count
-                /
-                len(search_words)
-            )
+            query_word_coverage = matched_word_count / len(search_words)
 
         else:
 
             query_word_coverage = 0.0
 
-        if (
-            normalized_query
-            ==
-            normalized_filename
-        ):
+        if normalized_query == normalized_filename:
 
             filename_relevance = 1.0
 
-        elif (
-            len(search_words) >= 2
-            and
-            normalized_query
-            in normalized_filename
-        ):
+        elif len(search_words) >= 2 and normalized_query in normalized_filename:
 
             filename_relevance = 0.95
 
         elif query_word_coverage > 0:
 
-            filename_relevance = (
-                0.75
-                *
-                query_word_coverage
-            )
+            filename_relevance = 0.75 * query_word_coverage
 
         else:
 
@@ -1072,26 +680,15 @@ def search_index(
 
         if max_content_score > 0:
 
-            content_relevance = (
-                content_score
-                /
-                max_content_score
-            )
+            content_relevance = content_score / max_content_score
 
         else:
 
             content_relevance = 0.0
 
-        phrase_relevance = min(
-            phrase_score / 100.0,
-            1.0
-        )
+        phrase_relevance = min(phrase_score / 100.0, 1.0)
 
-        if (
-            filetype_filter
-            and
-            not search_words
-        ):
+        if filetype_filter and not search_words:
 
             # Type-only query: this is a filtered document list.
             final_score = 0.75
@@ -1136,119 +733,43 @@ def search_index(
                 lexical_weight = 0.15
 
             final_score = (
-
-                (
-                    filename_relevance
-                    *
-                    filename_weight
-                )
-
-                +
-
-                (
-                    content_relevance
-                    *
-                    content_weight
-                )
-
-                +
-
-                (
-                    phrase_relevance
-                    *
-                    phrase_weight
-                )
-
-                +
-
-                (
-                    lexical_match_relevance
-                    *
-                    lexical_weight
-                )
+                (filename_relevance * filename_weight)
+                + (content_relevance * content_weight)
+                + (phrase_relevance * phrase_weight)
+                + (lexical_match_relevance * lexical_weight)
             )
 
-        if (
-            filename_score == 0
-            and
-            content_score == 0
-            and
-            phrase_score == 0
-        ):
+        if filename_score == 0 and content_score == 0 and phrase_score == 0:
             continue
 
         if final_score <= 0:
             continue
 
-        ranked_documents.append({
-
-            "filename":
-                filename,
-
-            "filename_score":
-                filename_score,
-
-            "content_score":
-                content_score,
-
-            "phrase_score":
-                phrase_score,
-
-            "phrase_occurrences":
-                scores[
-                    "phrase_occurrences"
-                ],
-
-            "final_score":
-                final_score,
-
-            "filename_matches":
-                scores[
-                    "filename_matches"
-                ],
-
-            "content_matches":
-                scores[
-                    "content_matches"
-                ],
-
-            "phrase_match":
-                scores[
-                    "phrase_match"
-                ],
-
-            "exact_content_match":
-                exact_content_match,
-
-            "prefix_similarity":
-                best_prefix_similarity,
-
-            "numeric_similarity":
-                best_numeric_similarity,
-
-            "lexical_match_relevance":
-                lexical_match_relevance
-
-        })
-
-    if (
-        filetype_filter
-        and
-        not search_words
-    ):
-
-        ranked_documents.sort(
-            key=lambda item:
-                item["filename"].lower()
+        ranked_documents.append(
+            {
+                "filename": filename,
+                "filename_score": filename_score,
+                "content_score": content_score,
+                "phrase_score": phrase_score,
+                "phrase_occurrences": scores["phrase_occurrences"],
+                "final_score": final_score,
+                "filename_matches": scores["filename_matches"],
+                "content_matches": scores["content_matches"],
+                "phrase_match": scores["phrase_match"],
+                "exact_content_match": exact_content_match,
+                "prefix_similarity": best_prefix_similarity,
+                "numeric_similarity": best_numeric_similarity,
+                "lexical_match_relevance": lexical_match_relevance,
+            }
         )
+
+    if filetype_filter and not search_words:
+
+        ranked_documents.sort(key=lambda item: item["filename"].lower())
 
     else:
 
-        ranked_documents.sort(
-            key=lambda item:
-                item["final_score"],
-            reverse=True
-        )
+        ranked_documents.sort(key=lambda item: item["final_score"], reverse=True)
 
     # --------------------------------------------------------
     # BUILD RESPONSE
@@ -1261,20 +782,12 @@ def search_index(
     # mirrors build_paginated_response exactly so the returned page is
     # unchanged.
     window_total = len(ranked_documents)
-    window_total_pages = (
-        (window_total + limit - 1) // limit
-        if window_total > 0
-        else 0
-    )
+    window_total_pages = (window_total + limit - 1) // limit if window_total > 0 else 0
     if window_total_pages > 0:
         window_page = max(1, min(requested_result_page, window_total_pages))
     else:
         window_page = max(1, requested_result_page)
-    window_start = (
-        (window_page - 1) * limit
-        if window_total_pages > 0
-        else 0
-    )
+    window_start = (window_page - 1) * limit if window_total_pages > 0 else 0
     window_end = window_start + limit
 
     results = []
@@ -1290,60 +803,31 @@ def search_index(
 
             continue
 
-        filename = item[
-            "filename"
-        ]
+        filename = item["filename"]
 
-        metadata = active_document_metadata[
-            filename
-        ]
+        metadata = active_document_metadata[filename]
 
-        filename_matches = item[
-            "filename_matches"
-        ]
+        filename_matches = item["filename_matches"]
 
-        content_matches = item[
-            "content_matches"
-        ]
+        content_matches = item["content_matches"]
 
-        phrase_match = item[
-            "phrase_match"
-        ]
+        phrase_match = item["phrase_match"]
 
-        if (
-            filetype_filter
-            and
-            not search_words
-        ):
+        if filetype_filter and not search_words:
 
-            match_type = (
-                f"File Type: "
-                f"{filetype_filter.upper()}"
-            )
+            match_type = f"File Type: " f"{filetype_filter.upper()}"
 
-        elif (
-            filename_matches
-            and
-            phrase_match
-        ):
+        elif filename_matches and phrase_match:
 
-            match_type = (
-                "Filename + Phrase"
-            )
+            match_type = "Filename + Phrase"
 
         elif phrase_match:
 
             match_type = "Phrase Match"
 
-        elif (
-            filename_matches
-            and
-            content_matches
-        ):
+        elif filename_matches and content_matches:
 
-            match_type = (
-                "Filename + Content"
-            )
+            match_type = "Filename + Content"
 
         elif filename_matches:
 
@@ -1353,174 +837,66 @@ def search_index(
 
             match_type = "Content Match"
 
-        if (
-            filetype_filter
-            and
-            not search_words
-        ):
+        if filetype_filter and not search_words:
 
-            snippet = (
-                f"Filtered by file type: "
-                f"{filetype_filter.upper()}"
-            )
+            snippet = f"Filtered by file type: " f"{filetype_filter.upper()}"
 
             document_page = None
             highlights = []
 
         elif content_matches:
 
-            snippet_words = (
-                phrase_words
-                if phrase_match
-                else content_matches
-            )
+            snippet_words = phrase_words if phrase_match else content_matches
 
             snippet_info = get_snippet_and_page(
-                active_page_text_index,
-                filename,
-                snippet_words
+                active_page_text_index, filename, snippet_words
             )
 
-            snippet = snippet_info[
-                "snippet"
-            ]
+            snippet = snippet_info["snippet"]
 
-            document_page = snippet_info[
-                "page"
-            ]
+            document_page = snippet_info["page"]
 
-            highlights = snippet_info[
-                "highlights"
-            ]
+            highlights = snippet_info["highlights"]
 
         else:
 
-            snippet = (
-                "Filename matched: "
-                +
-                ", ".join(
-                    filename_matches
-                )
-            )
+            snippet = "Filename matched: " + ", ".join(filename_matches)
 
             document_page = None
             highlights = []
 
-        document_url = (
-            "/api/documents/"
-            + quote(
-                filename,
-                safe=""
-            )
-        )
+        document_url = "/api/documents/" + quote(filename, safe="")
 
         if document_page is not None:
-            page_url = (
-                document_url
-                + f"#page={document_page}"
-            )
+            page_url = document_url + f"#page={document_page}"
         else:
             page_url = document_url
 
-        results.append({
-
-            "title":
-                metadata["title"],
-
-            "path":
-                metadata["path"],
-
-            "document_url":
-                document_url,
-
-            "page_url":
-                page_url,
-
-            "snippet":
-                snippet,
-
-            "page":
-                document_page,
-
-            "highlights":
-                highlights,
-
-            "phrase_occurrences":
-                item["phrase_occurrences"],
-
-            "filename_score":
-                round(
-                    item["filename_score"],
-                    4
+        results.append(
+            {
+                "title": metadata["title"],
+                "path": metadata["path"],
+                "document_url": document_url,
+                "page_url": page_url,
+                "snippet": snippet,
+                "page": document_page,
+                "highlights": highlights,
+                "phrase_occurrences": item["phrase_occurrences"],
+                "filename_score": round(item["filename_score"], 4),
+                "content_score": round(item["content_score"], 4),
+                "exact_content_match": item.get("exact_content_match", False),
+                "prefix_similarity": round(item.get("prefix_similarity", 0.0), 4),
+                "numeric_similarity": round(item.get("numeric_similarity", 0.0), 4),
+                "lexical_match_relevance": round(
+                    item.get("lexical_match_relevance", 0.0), 4
                 ),
+                "phrase_score": round(item["phrase_score"], 4),
+                "score": round(item["final_score"], 4),
+                "match_type": match_type,
+                "filetype_filter": filetype_filter,
+                "tag": "Ranked Result",
+                "open_url": page_url,
+            }
+        )
 
-            "content_score":
-                round(
-                    item["content_score"],
-                    4
-                ),
-
-            "exact_content_match":
-                item.get(
-                    "exact_content_match",
-                    False
-                ),
-
-            "prefix_similarity":
-                round(
-                    item.get(
-                        "prefix_similarity",
-                        0.0
-                    ),
-                    4
-                ),
-
-            "numeric_similarity":
-                round(
-                    item.get(
-                        "numeric_similarity",
-                        0.0
-                    ),
-                    4
-                ),
-
-            "lexical_match_relevance":
-                round(
-                    item.get(
-                        "lexical_match_relevance",
-                        0.0
-                    ),
-                    4
-                ),
-
-            "phrase_score":
-                round(
-                    item["phrase_score"],
-                    4
-                ),
-
-            "score":
-                round(
-                    item["final_score"],
-                    4
-                ),
-
-            "match_type":
-                match_type,
-
-            "filetype_filter":
-                filetype_filter,
-
-            "tag":
-                "Ranked Result",
-
-            "open_url":
-                page_url
-
-        })
-
-    return build_paginated_response(
-        results,
-        requested_result_page,
-        limit
-    )
+    return build_paginated_response(results, requested_result_page, limit)
