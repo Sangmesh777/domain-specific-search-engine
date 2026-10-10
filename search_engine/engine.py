@@ -24,6 +24,12 @@ ranking change is the expensive kind of mistake:
   body over the recorded vectors and adversarial queries and compares
   the results;
 * `tools/storage_equivalence.py` compares whole engine sessions.
+
+Note on the response assembly: the payload is built for the returned
+page only. Every other ranked document is counted for pagination but
+not assembled, so a search costs one page's worth of snippet work
+regardless of corpus size. This is an optimisation, not a behaviour
+change: the same 79 golden vectors pass at exact binary64.
 """
 
 import math
@@ -1248,9 +1254,41 @@ def search_index(
     # BUILD RESPONSE
     # --------------------------------------------------------
 
+    # Only the requested page's snippets are ever returned, so build them
+    # for that window alone. Every other result object is discarded by
+    # build_paginated_response below; skipping its snippet turns ~N
+    # snippet builds per query into ~limit of them. The window math
+    # mirrors build_paginated_response exactly so the returned page is
+    # unchanged.
+    window_total = len(ranked_documents)
+    window_total_pages = (
+        (window_total + limit - 1) // limit
+        if window_total > 0
+        else 0
+    )
+    if window_total_pages > 0:
+        window_page = max(1, min(requested_result_page, window_total_pages))
+    else:
+        window_page = max(1, requested_result_page)
+    window_start = (
+        (window_page - 1) * limit
+        if window_total_pages > 0
+        else 0
+    )
+    window_end = window_start + limit
+
     results = []
 
-    for item in ranked_documents:
+    for result_index, item in enumerate(ranked_documents):
+
+        if not (window_start <= result_index < window_end):
+
+            # Outside the returned page: build nothing. build_paginated_response
+            # only ever slices this window out, so the placeholder is never
+            # returned; it exists only to keep len(results) correct.
+            results.append(None)
+
+            continue
 
         filename = item[
             "filename"

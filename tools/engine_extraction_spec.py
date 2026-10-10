@@ -49,6 +49,12 @@ ranking change is the expensive kind of mistake:
   body over the recorded vectors and adversarial queries and compares
   the results;
 * `tools/storage_equivalence.py` compares whole engine sessions.
+
+Note on the response assembly: the payload is built for the returned
+page only. Every other ranked document is counted for pagination but
+not assembled, so a search costs one page's worth of snippet work
+regardless of corpus size. This is an optimisation, not a behaviour
+change: the same 79 golden vectors pass at exact binary64.
 """
 
 FUNCTIONS = [
