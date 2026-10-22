@@ -50,8 +50,6 @@ tests/test_filename_order_persistence.py 23  Filename order across a restart
 tests/test_memory_mutation_atomicity.py 20  Copy-on-write, torn reads
 tests/test_golden_artifacts.py          19  Artifact integrity and drift
 tests/test_restart_recovery.py          16  Restart, bulk delete, rebuild
-tests/test_jvm_semantics.py              7  JVM semantics for the Kotlin port
-tests/test_port_model.py                 6  Kotlin port algorithms
 tests/test_shadow_parity.py              3  Extraction coverage guard
 tests/test_golden_vectors.py             2  Full 79-vector replay
 ```
@@ -836,32 +834,9 @@ the tools cannot drift apart.
 | `generate_golden_vectors.py` | Records the vectors |
 | `verify_golden_vectors.py` | The parity gate |
 | `contract_vectors.py` | Shared contract tables |
-| `build_corpus_sidecar.py` | Builds the Android bootstrap artifact |
-| `port_model.py` | Executable model of the Kotlin ports |
 
 The corpus is materialised as real files so uploads exercise the true
 extraction path instead of bypassing it.
-
-## Porting rule
-
-The Android port is under `android/`. Because Kotlin cannot be compiled
-in this environment, `tools/port_model.py` models the Kotlin logic in
-Python **using Java's predicate semantics** and is checked against every
-contract vector by `tests/test_port_model.py`.
-
-The model also verifies the trickiest claim directly: the modelled
-predicates equal Python's `str.isalnum()` and `str.isspace()` for all
-1,114,112 code points, with zero mismatches.
-
-If you change a tokenizer, sanitizer or rounding rule, all of these must
-change together:
-
-1. `app.py`
-2. the Kotlin sources under `android/harness`
-3. `tools/port_model.py`
-4. `ANDROID.md`
-
-`tests/test_port_model.py` is what stops those from drifting.
 
 ## Development workflow
 
@@ -878,7 +853,6 @@ Use milestone commits, not one giant final commit. Existing checkpoints:
 ```text
 81faff9  Clean v1 release artifacts
 6a38294  Add golden-vector parity gate and hermetic test suite
-592f9a9  Add Android port specification, parity harness and port model
 0294e59  Serve the UI through a same-origin API proxy
 ```
 
@@ -892,7 +866,6 @@ Generated artifacts that **are** committed on purpose, because they are
 the contract and must be reviewable in diffs:
 
 * `tests/golden/search_engine_vectors.json`
-* `artifacts/android/corpus_sidecar.json`
 
 ## Layer 6: removing the web stack from `search_engine` (done)
 
@@ -925,7 +898,6 @@ actually prefixed, 0 divergences.
 
 ### The defect this uncovered
 
-`tools/port_model.py` is the specification the Kotlin sources were
 written from, and `SecureFilename.kt` mirrored it: both stripped
 directory components by scanning for `/` **or** `\`, with a comment
 claiming this mirrored `os.path.basename`. On POSIX it does not. Only `/`
