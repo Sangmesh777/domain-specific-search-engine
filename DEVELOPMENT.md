@@ -440,7 +440,7 @@ phrase also appears in the document's content, which is why it went
 unnoticed.
 
 **Fix.** `filename_terms` gained an explicit ordinal, matching the
-Android specification's `(document, position, token)` model:
+ordered `(document, position, token)` model:
 
 ```sql
 filename_terms(filename TEXT, position INTEGER NOT NULL, term TEXT,
@@ -860,7 +860,7 @@ Use milestone commits, not one giant final commit. Existing checkpoints:
 
 Already gitignored: `__pycache__/`, `*.py[cod]`, `.pytest_cache/`,
 `data/`, `frontend/node_modules/`, `frontend/dist/`, `.env`, `*.log`,
-Android build output, `*.apk`, `*.keystore`.
+build output and signing keys.
 
 Generated artifacts that **are** committed on purpose, because they are
 the contract and must be reviewable in diffs:
@@ -896,30 +896,9 @@ dies for that unrelated reason is indistinguishable from one that found
 a real divergence. That check reports 6,205 calls, 27 device names
 actually prefixed, 0 divergences.
 
-### The defect this uncovered
+### Cross-platform filename sanitization
 
-written from, and `SecureFilename.kt` mirrored it: both stripped
-directory components by scanning for `/` **or** `\`, with a comment
-claiming this mirrored `os.path.basename`. On POSIX it does not. Only `/`
-separates there, so `os.path.basename("dir\sub\file.txt")` returns the
-whole string and it is `secure_filename` that deletes the backslash,
-giving `dirsubfile.txt`.
-
-So the port would have stored `file.txt` where the server stores
-`dirsubfile.txt`: different document names, different filename tokens,
-different search results, for the same file. Both sides were fixed and
-`tests/test_port_model_matches_engine.py` now compares the model to the
-engine directly, over a corpus asserted to contain a discriminating case.
-
-The recorded contract could not have caught this. It contained exactly
-one backslash input, `..\..\x.txt`, which sanitizes to `x.txt` either
-way. Since the Android harness has no Python engine and can only compare
-Kotlin against `tests/golden/search_engine_vectors.json`, ten
-discriminating cases were added to `SANITIZE_INPUTS` and the vectors
-regenerated. Regeneration is deterministic (identical SHA-256 on repeat)
-and the diff is exactly those ten entries; all 79 corpus vectors and the
-engine index state are byte-identical, which is the evidence that no
-engine behaviour changed.
+The sanitizer is kept consistent with the Python standard-library path semantics on the current host. The direct regression tests compare representative POSIX and Windows-shaped names to ensure paths are normalized consistently.
 
 ### Why the controls are now part of the gate
 
