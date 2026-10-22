@@ -99,6 +99,4 @@ documented tooling if search behavior intentionally changes.
 - `tools/`: corpus, parity, extraction and verification tooling
 - `run_tests.sh`: full verification gate
 
-This repository focuses on the Python search engine and web application.
-Android application code and Android-specific parity artifacts are not
-part of this project configuration.
+This repository focuses on the Python search engine and React web application.
