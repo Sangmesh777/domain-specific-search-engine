@@ -18,14 +18,12 @@ documentation.
 """
 
 # Python str.isalnum() is Unicode-aware and counts No (e.g. ½, ²) and
-# Nl (e.g. Ⅻ) numerics as alphanumeric. Java's
-# Character.isLetterOrDigit() does not.
+# Nl (e.g. Ⅻ) numerics as alphanumeric.
 PYTHON_ALNUM_CHARACTERS = ["½", "²", "Ⅻ", "५", "字", "Ω", "é", "İ", "a", "Z", "7"]
 PYTHON_NON_ALNUM_CHARACTERS = ["\u200b", "\u0307", "!", " ", "\u00a0", "-", "\t", "\n"]
 
-# Python str.isspace() accepts the non-breaking spaces and U+0085 that
-# Java's Character.isWhitespace() rejects, and the U+001C-U+001F
-# separators that Java's isSpaceChar() rejects.
+# Python str.isspace() accepts non-breaking spaces, U+0085 and U+001C-U+001F
+# separators. These cases guard the exact Python tokenizer contract.
 PYTHON_WHITESPACE_CHARACTERS = [
     "\t",
     "\n",
@@ -120,11 +118,8 @@ SANITIZE_INPUTS = [
     #
     # `..\..\x.txt` above cannot see the difference: it sanitizes to
     # `x.txt` whether or not backslash is treated as a separator. The
-    # cases below exist so the recorded contract can, because the
-    # Android harness has no access to the Python engine and can only
-    # compare against these vectors. Without them a port that split on
-    # both separators would pass the parity suite while storing
-    # different document names than the server.
+    # cases below keep POSIX basename behavior distinct from Windows-style
+    # path splitting, so filename sanitization has discriminating coverage.
     "dir\\sub\\file.txt",
     "C:\\Users\\me\\report.pdf",
     "\\\\server\\share\\doc.docx",
@@ -171,11 +166,8 @@ SANITIZE_INPUTS = [
 ]
 
 # Python round() on a binary64 value is correctly-rounded decimal
-# rounding of the *exact* binary value, with ties to even. Java can
-# reproduce it with
-#     new BigDecimal(value).setScale(digits, RoundingMode.HALF_EVEN)
-# but not with BigDecimal.valueOf, not with HALF_UP, and not by
-# formatting a decimal string.
+# rounding of the exact binary value, with ties to even. The recorded
+# cases distinguish this behavior from rounding decimal text or half-up.
 ROUND_INPUTS = [
     (2.00005, 4),
     (0.56785, 4),
