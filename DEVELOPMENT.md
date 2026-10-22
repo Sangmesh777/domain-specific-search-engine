@@ -32,7 +32,7 @@ python3 -m pytest -q        # suite only
 
 `./run_tests.sh` runs seven gates in order: byte-compile, golden vectors,
 shadow parity, mutation equivalence, storage reconstruction parity,
-sidecar integrity, then pytest. Any failure exits non-zero.
+the complete pytest suite. Any failure exits non-zero.
 
 ### Two classes of test
 
