@@ -742,9 +742,7 @@ All five are done:
 | 4. `execute_search` -> `engine.search_index`, returning a plain dict | `d7ef25c` | done as layer 5 |
 | 5. route handlers reduced to parse / call / `jsonify` | - | **partly** |
 
-Step 4 is the one the Android `LocalBackend` depends on, because it is
-what turns the ranking pipeline into a callable function of an explicit
-snapshot rather than a web request. It is finished.
+Step 4 makes the ranking pipeline callable as a function of an explicit snapshot rather than a web request. It is finished.
 
 **Step 5 is not.** The search route is now a 46-line adapter, but the
 other four handlers still hold orchestration the storage and engine
