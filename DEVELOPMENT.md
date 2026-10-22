@@ -50,8 +50,6 @@ tests/test_filename_order_persistence.py 23  Filename order across a restart
 tests/test_memory_mutation_atomicity.py 20  Copy-on-write, torn reads
 tests/test_golden_artifacts.py          19  Artifact integrity and drift
 tests/test_restart_recovery.py          16  Restart, bulk delete, rebuild
-tests/test_jvm_semantics.py              7  JVM semantics for the Kotlin port
-tests/test_port_model.py                 6  Kotlin port algorithms
 tests/test_shadow_parity.py              3  Extraction coverage guard
 tests/test_golden_vectors.py             2  Full 79-vector replay
 ```
@@ -442,7 +440,7 @@ phrase also appears in the document's content, which is why it went
 unnoticed.
 
 **Fix.** `filename_terms` gained an explicit ordinal, matching the
-Android specification's `(document, position, token)` model:
+ordered `(document, position, token)` model:
 
 ```sql
 filename_terms(filename TEXT, position INTEGER NOT NULL, term TEXT,
@@ -744,9 +742,7 @@ All five are done:
 | 4. `execute_search` -> `engine.search_index`, returning a plain dict | `d7ef25c` | done as layer 5 |
 | 5. route handlers reduced to parse / call / `jsonify` | - | **partly** |
 
-Step 4 is the one the Android `LocalBackend` depends on, because it is
-what turns the ranking pipeline into a callable function of an explicit
-snapshot rather than a web request. It is finished.
+Step 4 makes the ranking pipeline callable as a function of an explicit snapshot rather than a web request. It is finished.
 
 **Step 5 is not.** The search route is now a 46-line adapter, but the
 other four handlers still hold orchestration the storage and engine
@@ -836,32 +832,9 @@ the tools cannot drift apart.
 | `generate_golden_vectors.py` | Records the vectors |
 | `verify_golden_vectors.py` | The parity gate |
 | `contract_vectors.py` | Shared contract tables |
-| `build_corpus_sidecar.py` | Builds the Android bootstrap artifact |
-| `port_model.py` | Executable model of the Kotlin ports |
 
 The corpus is materialised as real files so uploads exercise the true
 extraction path instead of bypassing it.
-
-## Porting rule
-
-The Android port is under `android/`. Because Kotlin cannot be compiled
-in this environment, `tools/port_model.py` models the Kotlin logic in
-Python **using Java's predicate semantics** and is checked against every
-contract vector by `tests/test_port_model.py`.
-
-The model also verifies the trickiest claim directly: the modelled
-predicates equal Python's `str.isalnum()` and `str.isspace()` for all
-1,114,112 code points, with zero mismatches.
-
-If you change a tokenizer, sanitizer or rounding rule, all of these must
-change together:
-
-1. `app.py`
-2. the Kotlin sources under `android/harness`
-3. `tools/port_model.py`
-4. `ANDROID.md`
-
-`tests/test_port_model.py` is what stops those from drifting.
 
 ## Development workflow
 
@@ -878,7 +851,6 @@ Use milestone commits, not one giant final commit. Existing checkpoints:
 ```text
 81faff9  Clean v1 release artifacts
 6a38294  Add golden-vector parity gate and hermetic test suite
-592f9a9  Add Android port specification, parity harness and port model
 0294e59  Serve the UI through a same-origin API proxy
 ```
 
@@ -886,13 +858,12 @@ Use milestone commits, not one giant final commit. Existing checkpoints:
 
 Already gitignored: `__pycache__/`, `*.py[cod]`, `.pytest_cache/`,
 `data/`, `frontend/node_modules/`, `frontend/dist/`, `.env`, `*.log`,
-Android build output, `*.apk`, `*.keystore`.
+build output and signing keys.
 
 Generated artifacts that **are** committed on purpose, because they are
 the contract and must be reviewable in diffs:
 
 * `tests/golden/search_engine_vectors.json`
-* `artifacts/android/corpus_sidecar.json`
 
 ## Layer 6: removing the web stack from `search_engine` (done)
 
@@ -923,31 +894,9 @@ dies for that unrelated reason is indistinguishable from one that found
 a real divergence. That check reports 6,205 calls, 27 device names
 actually prefixed, 0 divergences.
 
-### The defect this uncovered
+### Cross-platform filename sanitization
 
-`tools/port_model.py` is the specification the Kotlin sources were
-written from, and `SecureFilename.kt` mirrored it: both stripped
-directory components by scanning for `/` **or** `\`, with a comment
-claiming this mirrored `os.path.basename`. On POSIX it does not. Only `/`
-separates there, so `os.path.basename("dir\sub\file.txt")` returns the
-whole string and it is `secure_filename` that deletes the backslash,
-giving `dirsubfile.txt`.
-
-So the port would have stored `file.txt` where the server stores
-`dirsubfile.txt`: different document names, different filename tokens,
-different search results, for the same file. Both sides were fixed and
-`tests/test_port_model_matches_engine.py` now compares the model to the
-engine directly, over a corpus asserted to contain a discriminating case.
-
-The recorded contract could not have caught this. It contained exactly
-one backslash input, `..\..\x.txt`, which sanitizes to `x.txt` either
-way. Since the Android harness has no Python engine and can only compare
-Kotlin against `tests/golden/search_engine_vectors.json`, ten
-discriminating cases were added to `SANITIZE_INPUTS` and the vectors
-regenerated. Regeneration is deterministic (identical SHA-256 on repeat)
-and the diff is exactly those ten entries; all 79 corpus vectors and the
-engine index state are byte-identical, which is the evidence that no
-engine behaviour changed.
+The sanitizer is kept consistent with the Python standard-library path semantics on the current host. The direct regression tests compare representative POSIX and Windows-shaped names to ensure paths are normalized consistently.
 
 ### Why the controls are now part of the gate
 

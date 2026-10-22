@@ -1,7 +1,7 @@
 """
 Shared parity contract tables.
 
-These tables define the behaviour the Android port must reproduce.
+These tables define the behavior of the Python search contract.
 They are consumed twice:
 
   * by ``tools/generate_golden_vectors.py``, which evaluates every case
@@ -11,8 +11,7 @@ They are consumed twice:
     ``tests/test_rounding_contract.py``, which assert the engine still
     behaves this way
 
-The Android golden-vector harness reads the *evaluated* results out of
-the golden vector file, so there is exactly one source of truth.
+The golden vector file records evaluated results so there is exactly one reviewable source of truth.
 
 Every expectation was taken from the running engine rather than from
 documentation.
@@ -232,9 +231,9 @@ def build_contract_vectors(engine):
     return {
         "notes": [
             "These vectors pin Unicode, rounding and sanitizer semantics.",
-            "Token length is measured in characters (code points), not",
+            "Unicode token length is measured in Python characters (code points), not",
             "UTF-16 units: Python drops a single U+20000 but keeps two.",
-            "The Kotlin port must reproduce every expected value exactly.",
+            "Every recorded expected value is produced by the Python engine.",
             "Expected values were produced by the Python engine itself.",
         ],
         "character_classes": {
