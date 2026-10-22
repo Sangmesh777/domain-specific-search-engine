@@ -652,8 +652,7 @@ The transforms that produced it are declared in
 | the snapshot capture block -> deleted | the four names it bound become parameters; the caller holds the lock |
 | `jsonify(X)` -> `(X)` | the payload expression is untouched, so the body is identical - it is returned rather than serialised |
 
-This is the last piece the Android `LocalBackend` needs, because it is
-what turns the ranking into a function of an explicit snapshot rather
+This extraction makes ranking a function of an explicit snapshot rather
 than a web request.
 
 #### Two results worth keeping
