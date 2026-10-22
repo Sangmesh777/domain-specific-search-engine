@@ -27,9 +27,8 @@ CORS(app)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # The corpus location can be redirected so that the engine can be run
-# against a throwaway directory. This is used by the hermetic test
-# suite and by the golden-vector / corpus-sidecar generators, which
-# must never touch the developer's real corpus.
+# against a throwaway directory. This is used by the hermetic test suite and golden-vector generators,
+# which must never touch the developer's real corpus.
 #
 # Default behaviour is unchanged: <repo>/data
 DATA_FOLDER = os.environ.get(
